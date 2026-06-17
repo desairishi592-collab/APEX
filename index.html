@@ -353,19 +353,18 @@
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
     drawRing(d.score);
-    document.getElementById('r-metrics').innerHTML = d.metrics.map(m => `
-      <div class="metric">
-        <div class="metric-label">${m.label}</div>
-        <div class="metric-val">${m.value}</div>
-        <div class="metric-trend trend-${m.type}">${m.type==='up'?'↑':m.type==='down'?'↓':'⚠'} ${m.trend}</div>
-      </div>`).join('');
-    const icoMap = { danger: '🔴', warn: '🟡', good: '🟢' };
-    document.getElementById('r-insights').innerHTML = d.insights.map(i => `
-      <div class="insight-item">
-        <div class="insight-ico ico-${i.level}">${icoMap[i.level]||'●'}</div>
-        <div class="insight-body"><div class="ib-title">${i.title}</div><div class="ib-desc">${i.desc}</div></div>
-      </div>`).join('');
-    renderTab('cash');
+
+    // Populate hidden content behind paywall (still rendered in DOM for blur effect)
+    const metricsEl = document.getElementById('r-metrics');
+    if (metricsEl) {
+      metricsEl.innerHTML = d.metrics.map(m => `
+        <div class="metric">
+          <div class="metric-label">${m.label}</div>
+          <div class="metric-val">${m.value}</div>
+          <div class="metric-trend trend-${m.type}">${m.type==='up'?'↑':m.type==='down'?'↓':'⚠'} ${m.trend}</div>
+        </div>`).join('');
+    }
+
     show('s-results');
   }
 
