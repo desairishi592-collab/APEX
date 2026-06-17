@@ -274,6 +274,33 @@
 
   async function runScan() {
     document.getElementById('err-box').style.display = 'none';
+
+    const bizName = document.getElementById('biz-name').value.trim();
+    const industry = document.getElementById('biz-industry').value;
+    const revenue = document.getElementById('biz-revenue').value.trim();
+    const age = document.getElementById('biz-age').value.trim();
+
+    // Reset borders
+    ['biz-name','biz-industry','biz-revenue','biz-age'].forEach(id => {
+      document.getElementById(id).style.borderColor = '';
+    });
+
+    const missing = [];
+    if (!bizName) { missing.push('biz-name'); }
+    if (!industry) { missing.push('biz-industry'); }
+    if (!revenue) { missing.push('biz-revenue'); }
+    if (!age) { missing.push('biz-age'); }
+
+    if (missing.length > 0) {
+      missing.forEach(id => {
+        document.getElementById(id).style.borderColor = '#ef4444';
+      });
+      const err = document.getElementById('err-box');
+      err.textContent = '⚠ Please fill in all fields before running the scan — business name, industry, monthly revenue, and years in business are all required.';
+      err.style.display = 'block';
+      return;
+    }
+
     show('s-loading');
     ['st1','st2','st3','st4','st5'].forEach((id, i) => {
       setTimeout(() => document.getElementById(id).classList.add('done'), 700 + i * 800);
@@ -284,10 +311,10 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bizName: document.getElementById('biz-name').value || 'This Business',
-          industry: document.getElementById('biz-industry').value || 'General',
-          revenue: document.getElementById('biz-revenue').value || 'not provided',
-          age: document.getElementById('biz-age').value || 'not provided',
+          bizName,
+          industry,
+          revenue,
+          age,
           source: source || 'manual entry',
           fileContent
         })
