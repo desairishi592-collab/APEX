@@ -114,6 +114,36 @@
     .btn-outline { flex: 1; padding: 11px; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text); cursor: pointer; font-family: 'Inter', sans-serif; transition: border-color 0.15s; }
     .btn-outline:hover { border-color: var(--border-hover); }
 
+    .locked-section { position: relative; }
+    .locked-section .lock-overlay {
+      position: absolute; inset: 0; z-index: 10;
+      backdrop-filter: blur(6px);
+      background: rgba(10,10,15,0.7);
+      border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .paywall-card {
+      background: var(--card); border: 1px solid var(--accent-glow);
+      border-radius: var(--radius); padding: 2rem 1.5rem;
+      text-align: center; max-width: 380px; width: 90%;
+      box-shadow: 0 0 40px var(--accent-glow);
+    }
+    .paywall-card .pw-icon { font-size: 32px; margin-bottom: 12px; }
+    .paywall-card h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .paywall-card p { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 1.25rem; }
+    .paywall-card .pw-features { text-align: left; margin-bottom: 1.25rem; }
+    .paywall-card .pw-feature { font-size: 13px; color: var(--muted); padding: 4px 0; display: flex; align-items: center; gap: 8px; }
+    .paywall-card .pw-feature::before { content: '✓'; color: var(--green); font-weight: 600; }
+    .unlock-btn {
+      display: block; width: 100%; padding: 13px;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: var(--radius-sm); font-size: 15px; font-weight: 500;
+      cursor: pointer; font-family: 'Inter', sans-serif;
+      text-decoration: none; transition: opacity 0.2s;
+    }
+    .unlock-btn:hover { opacity: 0.88; }
+    .pw-note { font-size: 11px; color: var(--dim); margin-top: 8px; }
+
     @media (max-width: 540px) {
       .score-card { flex-direction: column; text-align: center; }
       .biz-grid { grid-template-columns: 1fr; }
@@ -193,6 +223,8 @@
       <h2>Health report</h2>
       <button class="rescan-btn" onclick="goBack()">← Scan another business</button>
     </div>
+
+    <!-- FREE: Score always visible -->
     <div class="score-card">
       <div class="score-ring-wrap">
         <canvas id="score-canvas" width="96" height="96"></canvas>
@@ -207,21 +239,25 @@
         <span class="score-badge" id="r-badge">—</span>
       </div>
     </div>
-    <div class="metrics-grid" id="r-metrics"></div>
-    <p class="section-title">Key insights</p>
-    <div class="insights-list" id="r-insights"></div>
-    <p class="section-title">Deep dive</p>
-    <div class="dive-card">
-      <div class="dive-tabs">
-        <div class="dive-tab active" onclick="switchTab(this,'cash')">Cash flow</div>
-        <div class="dive-tab" onclick="switchTab(this,'expenses')">Expenses</div>
-        <div class="dive-tab" onclick="switchTab(this,'risk')">Risk flags</div>
+
+    <!-- LOCKED: Metrics -->
+    <div class="locked-section">
+      <div class="metrics-grid" id="r-metrics"></div>
+      <div class="lock-overlay">
+        <div class="paywall-card">
+          <div class="pw-icon">🔒</div>
+          <h3>Unlock your full report</h3>
+          <p>Your score is just the beginning. See exactly what's hurting your business and how to fix it.</p>
+          <div class="pw-features">
+            <div class="pw-feature">Key metrics — cash runway, burn rate, margins</div>
+            <div class="pw-feature">3 prioritized insights with action steps</div>
+            <div class="pw-feature">Full deep-dive: cash flow, expenses, risk flags</div>
+            <div class="pw-feature">Unlimited scans every month</div>
+          </div>
+          <a class="unlock-btn" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank">Unlock full report — $20/mo</a>
+          <div class="pw-note">Cancel anytime · Secure payment via Stripe</div>
+        </div>
       </div>
-      <div class="dive-body" id="dive-body"></div>
-    </div>
-    <div class="action-row">
-      <button class="btn-outline" onclick="window.print()">⬇ Export report</button>
-      <button class="btn btn-accent" style="flex:1; border-radius:8px; font-size:13px;" onclick="goBack()">Scan another business</button>
     </div>
   </div>
 </div>
