@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>APEX — Business Health Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --card: #16161f;
+      --border: rgba(255,255,255,0.08);
+      --border-hover: rgba(255,255,255,0.16);
+      --accent: #6C63FF;
+      --accent-dim: rgba(108,99,255,0.15);
+      --accent-glow: rgba(108,99,255,0.3);
+      --text: #f0f0f5;
+      --muted: #8888a0;
+      --dim: #555568;
+      --green: #22c55e;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --green-dim: rgba(34,197,94,0.12);
+      --red-dim: rgba(239,68,68,0.12);
+      --amber-dim: rgba(245,158,11,0.12);
+      --radius: 12px;
+      --radius-sm: 8px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* NAV */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: rgba(10,10,15,0.92);
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    .nav-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .nav-logo-mark {
+      width: 32px; height: 32px; border-radius: 8px;
+      background: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600; font-size: 13px; color: #fff; letter-spacing: 1px;
+    }
+    .nav-logo-text { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 16px; color: var(--text); }
+    .nav-badge { font-size: 11px; background: var(--accent-dim); color: var(--accent); padding: 3px 8px; border-radius: 20px; border: 1px solid var(--accent-glow); }
+
+    /* SCREENS */
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    /* SETUP SCREEN */
+    .setup-wrap { max-width: 520px; margin: 0 auto; padding: 3rem 1.5rem; }
+    .setup-hero { text-align: center; margin-bottom: 2.5rem; }
+    .setup-hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 28px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+    .setup-hero p { font-size: 15px; color: var(--muted); line-height: 1.7; }
+
+    .setup-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .setup-card label { font-size: 13px; font-weight: 500; color: var(--text); display: block; margin-bottom: 6px; }
+    .setup-card .hint { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+    .hint a { color: var(--accent); text-decoration: none; }
+    .hint a:hover { text-decoration: underline; }
+    .key-row { display: flex; gap: 8px; }
+    .key-row input {
+      flex: 1; padding: 10px 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text); font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      transition: border-color 0.2s;
+    }
+    .key-row input:focus { outline: none; border-color: var(--accent); }
+    .key-row input::placeholder { color: var(--dim); }
+    .key-saved { font-size: 12px; color: var(--green); margin-top: 8px; display: none; }
+
+    .btn {
+      padding: 10px 20px; border: none; border-radius: var(--radius-sm);
+      font-size: 14px; font-weight: 500; cursor: pointer;
+      font-family: 'Inter', sans-serif; transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn:hover { opacity: 0.88; }
+    .btn:active { transform: scale(0.98); }
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-full { width: 100%; padding: 13px; font-size: 15px; margin-top: 1rem; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* CONNECT SCREEN */
+    .connect-wrap { max-width: 680px; margin: 0 auto; padding: 2.5rem 1.5rem; }
+    .connect-hero { margin-bottom: 2rem; }
+    .connect-hero h2 { font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .connect-hero p { font-size: 14px; color: var(--muted); }
+
+    .source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+    .source-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem 1rem;
+      cursor: pointer; text-align: center; transition: border-color 0.15s, background 0.15s;
+    }
+    .source-card:hover { border-color: var(--border-hover); background: var(--surface); }
+    .source-card.sel { border-color: var(--accent); background: var(--accent-dim); }
+    .source-icon { font-size: 26px; margin-bottom: 8px; display: block; }
+    .source-name { font-size: 13px; font-weight: 500; color: var(--text); }
+    .source-type { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .or-line { display: flex; align-items: center; gap: 12px; margin: 1.25rem 0; }
+    .or-line::before, .or-line::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .or-line span { font-size: 12px; color: var(--dim); }
+
+    .drop-zone {
+      border: 1px dashed var(--border-hover); border-radius: var(--radius);
+      padding: 2rem; text-align: center; cursor: pointer; transition: background 0.15s;
+      margin-bottom: 1.5rem;
+    }
+    .drop-zone:hover { background: var(--card); border-color: var(--accent); }
+    .drop-icon { font-size: 28px; margin-bottom: 8px; display: block; color: var(--muted); }
+    .drop-title { font-size: 14px; color: var(--text); margin-bottom: 4px; }
+    .drop-sub { font-size: 12px; color: var(--muted); }
+    .file-ok { font-size: 12px; color: var(--green); margin-top: 8px; display: none; text-align: center; }
+
+    .biz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1.5rem; }
+    .biz-grid input, .biz-grid select {
+      padding: 10px 12px; background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text); font-size: 13px;
+      font-family: 'Inter', sans-serif; transition: border-color 0.2s;
+    }
+    .biz-grid input:focus, .biz-grid select:focus { outline: none; border-color: var(--accent); }
+    .biz-grid input::placeholder { color: var(--dim); }
+    .biz-grid select option { background: var(--card); }
+    .biz-label { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 8px; display: block; }
+
+    .err { background: var(--red-dim); border: 1px solid rgba(239,68,68,0.2); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 13px; color: #fca5a5; margin-top: 1rem; display: none; }
+
+    /* LOADING */
+    .loading-wrap { max-width: 440px; margin: 0 auto; padding: 5rem 1.5rem; text-align: center; }
+    .loader {
+      width: 60px; height: 60px; border-radius: 50%;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 1.5rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-wrap h2 { font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .loading-wrap p { font-size: 14px; color: var(--muted); margin-bottom: 2rem; }
+    .step-list { list-style: none; text-align: left; display: inline-block; }
+    .step-list li { font-size: 13px; color: var(--dim); padding: 5px 0; display: flex; align-items: center; gap: 10px; transition: color 0.3s; }
+    .step-list li.done { color: var(--green); }
+    .step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; transition: background 0.3s; }
+    .step-list li.done .step-dot { background: var(--green); }
+
+    /* RESULTS */
+    .results-wrap { max-width: 780px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: gap; gap: 10px; }
+    .results-header h2 { font-family: 'Space Grotesk', sans-serif; font-size: 20px; font-weight: 600; }
+    .rescan-btn { font-size: 13px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 14px; cursor: pointer; font-family: 'Inter', sans-serif; transition: border-color 0.15s, color 0.15s; }
+    .rescan-btn:hover { border-color: var(--border-hover); color: var(--text); }
+
+    .score-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.5rem;
+      display: flex; gap: 1.5rem; align-items: center; margin-bottom: 1.25rem;
+    }
+    .score-ring-wrap { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
+    .score-ring-wrap canvas { position: absolute; top: 0; left: 0; }
+    .score-center {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 1;
+    }
+    .score-num { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600; color: var(--text); line-height: 1; }
+    .score-denom { font-size: 11px; color: var(--muted); }
+    .score-detail h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .score-detail p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .score-badge { display: inline-block; margin-top: 10px; font-size: 11px; padding: 4px 10px; border-radius: 20px; background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-glow); }
+
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 1.25rem; }
+    .metric {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.125rem 1rem;
+    }
+    .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+    .metric-val { font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .metric-trend { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+    .trend-up { color: var(--green); }
+    .trend-down { color: var(--red); }
+    .trend-warn { color: var(--amber); }
+
+    .section-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 10px; }
+
+    .insights-list { margin-bottom: 1.25rem; }
+    .insight-item {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .insight-item:last-child { border-bottom: none; }
+    .insight-ico {
+      width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 16px;
+    }
+    .ico-danger { background: var(--red-dim); }
+    .ico-warn { background: var(--amber-dim); }
+    .ico-good { background: var(--green-dim); }
+    .insight-body .ib-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 3px; }
+    .insight-body .ib-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+    .dive-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; margin-bottom: 1.25rem;
+    }
+    .dive-tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .dive-tab {
+      padding: 10px 16px; font-size: 13px; color: var(--muted); cursor: pointer;
+      border-bottom: 2px solid transparent; transition: color 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+    .dive-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .dive-body { padding: 1rem; }
+    .dive-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .dive-row:last-child { border-bottom: none; }
+    .dr-label { color: var(--muted); }
+    .dr-val { font-weight: 500; color: var(--text); }
+    .dr-val.red { color: var(--red); }
+    .dr-val.grn { color: var(--green); }
+    .dr-val.amb { color: var(--amber); }
+
+    .action-row { display: flex; gap: 10px; }
+    .btn-outline {
+      flex: 1; padding: 11px; background: transparent;
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+      font-size: 13px; color: var(--text); cursor: pointer;
+      font-family: 'Inter', sans-serif; transition: border-color 0.15s;
+    }
+    .btn-outline:hover { border-color: var(--border-hover); }
+
+    @media (max-width: 540px) {
+      .score-card { flex-direction: column; text-align: center; }
+      .biz-grid { grid-template-columns: 1fr; }
+      .action-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-logo" href="#">
+    <div class="nav-logo-mark">AX</div>
+    <span class="nav-logo-text">APEX</span>
+  </a>
+  <span class="nav-badge">Business Health Scanner</span>
+</nav>
+
+<!-- SCREEN 1: SETUP -->
+<div class="screen active" id="s-setup">
+  <div class="setup-wrap">
+    <div class="setup-hero">
+      <h1>Know your business health before it's too late</h1>
+      <p>APEX scans your real financial data and gives you a health score, key risks, and a full deep-dive report — powered by AI, in seconds.</p>
+    </div>
+    <div class="setup-card">
+      <label>Your Groq API key</label>
+      <p class="hint">Free at <a href="https://console.groq.com" target="_blank">console.groq.com</a> → API Keys → Create key. Your key stays in your browser only — we never store it.</p>
+      <div class="key-row">
+        <input type="password" id="groq-key" placeholder="gsk_..." />
+        <button class="btn btn-accent" onclick="saveKey()">Save</button>
+      </div>
+      <div class="key-saved" id="key-saved">✓ Key saved — ready to scan</div>
+    </div>
+    <button class="btn btn-accent btn-full" onclick="goConnect()">Get started →</button>
+  </div>
+</div>
+
+<!-- SCREEN 2: CONNECT -->
+<div class="screen" id="s-connect">
+  <div class="connect-wrap">
+    <div class="connect-hero">
+      <h2>Connect your financials</h2>
+      <p>Select a data source or upload a file. APEX analyzes everything locally — your data never leaves your browser.</p>
+    </div>
+
+    <div class="source-grid">
+      <div class="source-card" onclick="pickSource(this,'QuickBooks')">
+        <span class="source-icon">📊</span>
+        <div class="source-name">QuickBooks</div>
+        <div class="source-type">Accounting</div>
+      </div>
+      <div class="source-card" onclick="pickSource(this,'Stripe')">
+        <span class="source-icon">💳</span>
+        <div class="source-name">Stripe</div>
+        <div class="source-type">Payments</div>
+      </div>
+      <div class="source-card" onclick="pickSource(this,'Bank (Plaid)')">
+        <span class="source-icon">🏦</span>
+        <div class="source-name">Bank account</div>
+        <div class="source-type">Via Plaid</div>
+      </div>
+      <div class="source-card" onclick="pickSource(this,'Xero')">
+        <span class="source-icon">🧾</span>
+        <div class="source-name">Xero</div>
+        <div class="source-type">Accounting</div>
+      </div>
+    </div>
+
+    <div class="or-line"><span>or upload a file</span></div>
+
+    <div class="drop-zone" onclick="document.getElementById('file-in').click()">
+      <span class="drop-icon">⬆️</span>
+      <div class="drop-title">Drop your bank statement, CSV, or Excel file</div>
+      <div class="drop-sub">Supports .csv, .xlsx, .pdf · Max 10MB</div>
+    </div>
+    <input type="file" id="file-in" accept=".csv,.xlsx,.pdf,.txt" style="display:none" onchange="onFile(this)" />
+    <div class="file-ok" id="file-ok">✓ <span id="file-name-label"></span> ready</div>
+
+    <span class="biz-label">Tell APEX about your business (for accurate benchmarking)</span>
+    <div class="biz-grid">
+      <input type="text" id="biz-name" placeholder="Business name" />
+      <select id="biz-industry">
+        <option value="">Industry</option>
+        <option>Retail</option>
+        <option>SaaS / Tech</option>
+        <option>Restaurant / Food</option>
+        <option>Consulting / Services</option>
+        <option>E-commerce</option>
+        <option>Construction / Trades</option>
+        <option>Healthcare</option>
+        <option>Manufacturing</option>
+        <option>Other</option>
+      </select>
+      <input type="text" id="biz-revenue" placeholder="Monthly revenue ($)" />
+      <input type="text" id="biz-age" placeholder="Years in business" />
+    </div>
+
+    <button class="btn btn-accent btn-full" onclick="runScan()">Run health scan →</button>
+    <div class="err" id="err-box"></div>
+  </div>
+</div>
+
+<!-- SCREEN 3: LOADING -->
+<div class="screen" id="s-loading">
+  <div class="loading-wrap">
+    <div class="loader"></div>
+    <h2>Scanning your business</h2>
+    <p>Groq AI is analyzing your financials...</p>
+    <ul class="step-list" id="step-list">
+      <li id="st1"><span class="step-dot"></span> Parsing financial data</li>
+      <li id="st2"><span class="step-dot"></span> Calculating cash runway</li>
+      <li id="st3"><span class="step-dot"></span> Detecting anomalies</li>
+      <li id="st4"><span class="step-dot"></span> Benchmarking against industry</li>
+      <li id="st5"><span class="step-dot"></span> Generating health score</li>
+    </ul>
+  </div>
+</div>
+
+<!-- SCREEN 4: RESULTS -->
+<div class="screen" id="s-results">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Health report</h2>
+      <button class="rescan-btn" onclick="goConnect()">← Scan another business</button>
+    </div>
+
+    <div class="score-card">
+      <div class="score-ring-wrap">
+        <canvas id="score-canvas" width="96" height="96"></canvas>
+        <div class="score-center">
+          <span class="score-num" id="r-score">—</span>
+          <span class="score-denom">/100</span>
+        </div>
+      </div>
+      <div class="score-detail">
+        <h3 id="r-status">—</h3>
+        <p id="r-summary">—</p>
+        <span class="score-badge" id="r-badge">—</span>
+      </div>
+    </div>
+
+    <div class="metrics-grid" id="r-metrics"></div>
+
+    <p class="section-title">Key insights</p>
+    <div class="insights-list" id="r-insights"></div>
+
+    <p class="section-title">Deep dive</p>
+    <div class="dive-card">
+      <div class="dive-tabs">
+        <div class="dive-tab active" onclick="switchTab(this,'cash')">Cash flow</div>
+        <div class="dive-tab" onclick="switchTab(this,'expenses')">Expenses</div>
+        <div class="dive-tab" onclick="switchTab(this,'risk')">Risk flags</div>
+      </div>
+      <div class="dive-body" id="dive-body"></div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn-outline" onclick="askActionPlan()">💡 Get action plan</button>
+      <button class="btn btn-accent" style="flex:1; border-radius:8px; font-size:13px;" onclick="window.print()">⬇ Export report</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let groqKey = '';
+  let source = '';
+  let fileContent = '';
+  let scanData = null;
+
+  function show(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    window.scrollTo(0, 0);
+  }
+
+  function saveKey() {
+    const v = document.getElementById('groq-key').value.trim();
+    if (!v.startsWith('gsk_')) { alert('Please enter a valid Groq key starting with gsk_'); return; }
+    groqKey = v;
+    document.getElementById('key-saved').style.display = 'block';
+  }
+
+  function goConnect() {
+    if (!groqKey) { alert('Please enter and save your Groq API key first.'); return; }
+    show('s-connect');
+  }
+
+  function pickSource(el, src) {
+    document.querySelectorAll('.source-card').forEach(c => c.classList.remove('sel'));
+    el.classList.add('sel');
+    source = src;
+  }
+
+  function onFile(inp) {
+    const f = inp.files[0]; if (!f) return;
+    source = 'Uploaded: ' + f.name;
+    document.getElementById('file-name-label').textContent = f.name;
+    document.getElementById('file-ok').style.display = 'block';
+    const reader = new FileReader();
+    reader.onload = e => { fileContent = e.target.result.slice(0, 4000); };
+    reader.readAsText(f);
+  }
+
+  async function runScan() {
+    document.getElementById('err-box').style.display = 'none';
+    if (!groqKey) { showErr('Please go back and enter your Groq API key.'); return; }
+
+    const bizName = document.getElementById('biz-name').value || 'This Business';
+    const industry = document.getElementById('biz-industry').value || 'General';
+    const revenue = document.getElementById('biz-revenue').value || 'not provided';
+    const age = document.getElementById('biz-age').value || 'not provided';
+
+    show('s-loading');
+
+    ['st1','st2','st3','st4','st5'].forEach((id, i) => {
+      setTimeout(() => {
+        document.getElementById(id).classList.add('done');
+      }, 700 + i * 800);
+    });
+
+    const prompt = `You are APEX, an expert business health analyst AI. Analyze the business below and return ONLY a raw JSON object — no markdown, no backticks, no explanation. Just the JSON.
+
+Business name: ${bizName}
+Industry: ${industry}
+Monthly revenue: $${revenue}
+Years in business: ${age}
+Data source: ${source || 'manual entry'}
+${fileContent ? 'Financial data:\n' + fileContent.slice(0, 2000) : ''}
+
+Return exactly this structure:
+{
+  "score": <integer 0-100>,
+  "status": "<Critical|Poor|Fair|Good|Excellent>",
+  "summary": "<2 sentences about overall business health>",
+  "badge": "<short note like 'First scan — baseline set' or '+4 pts from industry avg'>",
+  "metrics": [
+    {"label": "Cash runway", "value": "<X mo>", "trend": "<short note>", "type": "<up|down|warn>"},
+    {"label": "Monthly revenue", "value": "$<amount>", "trend": "<short note>", "type": "<up|down|warn>"},
+    {"label": "Burn rate", "value": "$<amount>", "trend": "<short note>", "type": "<up|down|warn>"},
+    {"label": "Gross margin", "value": "<X%>", "trend": "<short note>", "type": "<up|down|warn>"}
+  ],
+  "insights": [
+    {"title": "<issue>", "desc": "<2 sentence explanation>", "level": "<danger|warn|good>"},
+    {"title": "<issue>", "desc": "<2 sentence explanation>", "level": "<danger|warn|good>"},
+    {"title": "<issue>", "desc": "<2 sentence explanation>", "level": "<danger|warn|good>"}
+  ],
+  "cash": [
+    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
+    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
+    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
+    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
+    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"}
+  ],
+  "expenses": [
+    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
+    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
+    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
+    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
+    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"}
+  ],
+  "risk": [
+    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
+    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
+    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
+    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
+    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"}
+  ]
+}`;
+
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + groqKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 1400,
+          temperature: 0.3,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+
+      if (!res.ok) {
+        const e = await res.json();
+        show('s-connect');
+        showErr('Groq error: ' + (e.error?.message || 'Check your API key and try again.'));
+        return;
+      }
+
+      const data = await res.json();
+      let raw = data.choices[0].message.content.trim().replace(/```json|```/g, '').trim();
+      scanData = JSON.parse(raw);
+      renderResults(scanData);
+    } catch(e) {
+      show('s-connect');
+      showErr('Something went wrong: ' + e.message + '. Check your API key and try again.');
+    }
+  }
+
+  function renderResults(d) {
+    document.getElementById('r-score').textContent = d.score;
+    document.getElementById('r-status').textContent = 'Health: ' + d.status;
+    document.getElementById('r-summary').textContent = d.summary;
+    document.getElementById('r-badge').textContent = d.badge;
+    drawRing(d.score);
+
+    document.getElementById('r-metrics').innerHTML = d.metrics.map(m => `
+      <div class="metric">
+        <div class="metric-label">${m.label}</div>
+        <div class="metric-val">${m.value}</div>
+        <div class="metric-trend trend-${m.type}">
+          ${m.type === 'up' ? '↑' : m.type === 'down' ? '↓' : '⚠'} ${m.trend}
+        </div>
+      </div>`).join('');
+
+    const icoMap = { danger: '🔴', warn: '🟡', good: '🟢' };
+    document.getElementById('r-insights').innerHTML = d.insights.map(i => `
+      <div class="insight-item">
+        <div class="insight-ico ico-${i.level}">${icoMap[i.level] || '●'}</div>
+        <div class="insight-body">
+          <div class="ib-title">${i.title}</div>
+          <div class="ib-desc">${i.desc}</div>
+        </div>
+      </div>`).join('');
+
+    renderTab('cash');
+    show('s-results');
+  }
+
+  function drawRing(score) {
+    const c = document.getElementById('score-canvas');
+    const ctx = c.getContext('2d');
+    const cx = 48, cy = 48, r = 40;
+    ctx.clearRect(0, 0, 96, 96);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 6; ctx.stroke();
+    const color = score >= 70 ? '#22c55e' : score >= 45 ? '#f59e0b' : '#ef4444';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + (score / 100) * Math.PI * 2);
+    ctx.strokeStyle = color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
+  }
+
+  function renderTab(key) {
+    if (!scanData) return;
+    document.getElementById('dive-body').innerHTML = (scanData[key] || []).map(r =>
+      `<div class="dive-row"><span class="dr-label">${r.label}</span><span class="dr-val ${r.color || ''}">${r.value}</span></div>`
+    ).join('');
+  }
+
+  function switchTab(el, key) {
+    document.querySelectorAll('.dive-tab').forEach(t => t.classList.remove('active'));
+    el.classList.add('active');
+    renderTab(key);
+  }
+
+  function showErr(msg) {
+    const b = document.getElementById('err-box');
+    b.textContent = msg; b.style.display = 'block';
+  }
+
+  function askActionPlan() {
+    if (!scanData) return;
+    const summary = `My business got a health score of ${scanData.score}/100 (${scanData.status}). Key issues: ${scanData.insights.map(i => i.title).join(', ')}. What are the top 3 specific actions I should take right now?`;
+    alert('Copy this into Claude or ChatGPT:\n\n' + summary);
+  }
+</script>
+</body>
+</html>
