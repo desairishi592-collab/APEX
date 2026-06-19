@@ -6,6 +6,7 @@
   <title>APEX — Business Health Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -144,6 +145,30 @@
     .unlock-btn:hover { opacity: 0.88; }
     .pw-note { font-size: 11px; color: var(--dim); margin-top: 8px; }
 
+    /* AUTH */
+    .nav-auth { display: flex; align-items: center; gap: 10px; }
+    .nav-account-btn { font-size: 13px; color: var(--text); background: var(--card); border: 1px solid var(--border); padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'Inter', sans-serif; transition: border-color 0.15s; }
+    .nav-account-btn:hover { border-color: var(--border-hover); }
+    .pro-pill { font-size: 11px; background: var(--green-dim); color: var(--green); padding: 3px 9px; border-radius: 20px; border: 1px solid rgba(34,197,94,0.25); }
+
+    .auth-overlay { position: fixed; inset: 0; background: rgba(5,5,8,0.85); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: center; justify-content: center; padding: 1rem; }
+    .auth-overlay.active { display: flex; }
+    .auth-modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; max-width: 380px; width: 100%; position: relative; }
+    .auth-close { position: absolute; top: 14px; right: 14px; background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; }
+    .auth-modal h2 { font-family: 'Space Grotesk', sans-serif; font-size: 19px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .auth-modal p.auth-sub { font-size: 13px; color: var(--muted); margin-bottom: 1.25rem; }
+    .auth-field { margin-bottom: 12px; }
+    .auth-field label { font-size: 12px; color: var(--text); display: block; margin-bottom: 5px; }
+    .auth-field input { width: 100%; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 13px; font-family: 'Inter', sans-serif; }
+    .auth-field input:focus { outline: none; border-color: var(--accent); }
+    .auth-switch { font-size: 12px; color: var(--muted); text-align: center; margin-top: 14px; }
+    .auth-switch a { color: var(--accent); cursor: pointer; text-decoration: none; }
+    .auth-err { font-size: 12px; color: #fca5a5; margin-top: 8px; display: none; }
+    .account-menu { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; max-width: 360px; width: 100%; }
+    .account-menu .am-email { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+    .account-menu .am-status { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 1.25rem; }
+    .account-menu .am-row { display: flex; gap: 8px; }
+
     @media (max-width: 540px) {
       .score-card { flex-direction: column; text-align: center; }
       .biz-grid { grid-template-columns: 1fr; }
@@ -157,8 +182,46 @@
     <div class="nav-logo-mark">AX</div>
     <span class="nav-logo-text">APEX</span>
   </a>
-  <span class="nav-badge">Business Health Scanner</span>
+  <div class="nav-auth" id="nav-auth">
+    <button class="nav-account-btn" onclick="openAuth('login')" id="btn-login">Log in</button>
+    <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')" id="btn-signup">Sign up</button>
+  </div>
 </nav>
+
+<!-- AUTH MODAL -->
+<div class="auth-overlay" id="auth-overlay">
+  <div class="auth-modal">
+    <button class="auth-close" onclick="closeAuth()">✕</button>
+    <h2 id="auth-title">Log in to APEX</h2>
+    <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
+    <div class="auth-field">
+      <label>Email</label>
+      <input type="email" id="auth-email" placeholder="you@example.com" />
+    </div>
+    <div class="auth-field">
+      <label>Password</label>
+      <input type="password" id="auth-password" placeholder="••••••••" />
+    </div>
+    <button class="btn btn-accent btn-full" onclick="submitAuth()" id="auth-submit-btn">Log in</button>
+    <div class="auth-err" id="auth-err"></div>
+    <div class="auth-switch" id="auth-switch">
+      Don't have an account? <a onclick="openAuth('signup')">Sign up</a>
+    </div>
+  </div>
+</div>
+
+<!-- ACCOUNT MODAL -->
+<div class="auth-overlay" id="account-overlay">
+  <div class="account-menu">
+    <button class="auth-close" onclick="closeAccount()">✕</button>
+    <div class="am-email" id="am-email">—</div>
+    <div class="am-status" id="am-status">—</div>
+    <div class="am-row">
+      <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:block;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
+      <button class="btn-outline" style="flex:1;" onclick="logout()">Log out</button>
+    </div>
+  </div>
+</div>
 
 <!-- SCREEN 1: CONNECT -->
 <div class="screen active" id="s-connect">
@@ -263,6 +326,119 @@
 </div>
 
 <script>
+  // ── SUPABASE SETUP ──
+  const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_8mmrVblH7FPjx_n0z515JA_QIGON0BO';
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  let currentUser = null;
+  let isPro = false;
+  let authMode = 'login';
+
+  async function checkSession() {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      currentUser = session.user;
+      await loadProfile();
+    }
+    renderAuthState();
+  }
+
+  async function loadProfile() {
+    if (!currentUser) return;
+    const { data } = await sb.from('profiles').select('is_pro').eq('id', currentUser.id).single();
+    isPro = data?.is_pro || false;
+  }
+
+  function renderAuthState() {
+    const navAuth = document.getElementById('nav-auth');
+    if (currentUser) {
+      navAuth.innerHTML = `
+        <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
+        ${isPro ? '<span class="pro-pill">PRO</span>' : ''}
+      `;
+    } else {
+      navAuth.innerHTML = `
+        <button class="nav-account-btn" onclick="openAuth('login')">Log in</button>
+        <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')">Sign up</button>
+      `;
+    }
+  }
+
+  function openAuth(mode) {
+    authMode = mode;
+    document.getElementById('auth-overlay').classList.add('active');
+    document.getElementById('auth-err').style.display = 'none';
+    document.getElementById('auth-email').value = '';
+    document.getElementById('auth-password').value = '';
+    if (mode === 'login') {
+      document.getElementById('auth-title').textContent = 'Log in to APEX';
+      document.getElementById('auth-sub').textContent = 'Welcome back — pick up where you left off.';
+      document.getElementById('auth-submit-btn').textContent = 'Log in';
+      document.getElementById('auth-switch').innerHTML = `Don't have an account? <a onclick="openAuth('signup')">Sign up</a>`;
+    } else {
+      document.getElementById('auth-title').textContent = 'Create your APEX account';
+      document.getElementById('auth-sub').textContent = 'Free to start — upgrade anytime for full reports.';
+      document.getElementById('auth-submit-btn').textContent = 'Sign up';
+      document.getElementById('auth-switch').innerHTML = `Already have an account? <a onclick="openAuth('login')">Log in</a>`;
+    }
+  }
+
+  function closeAuth() {
+    document.getElementById('auth-overlay').classList.remove('active');
+  }
+
+  async function submitAuth() {
+    const email = document.getElementById('auth-email').value.trim();
+    const password = document.getElementById('auth-password').value;
+    const errEl = document.getElementById('auth-err');
+    errEl.style.display = 'none';
+
+    if (!email || !password) {
+      errEl.textContent = 'Please enter both email and password.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    try {
+      let result;
+      if (authMode === 'signup') {
+        result = await sb.auth.signUp({ email, password });
+      } else {
+        result = await sb.auth.signInWithPassword({ email, password });
+      }
+      if (result.error) throw result.error;
+      currentUser = result.data.user;
+      await loadProfile();
+      renderAuthState();
+      closeAuth();
+    } catch (e) {
+      errEl.textContent = e.message;
+      errEl.style.display = 'block';
+    }
+  }
+
+  function openAccount() {
+    document.getElementById('am-email').textContent = currentUser.email;
+    document.getElementById('am-status').textContent = isPro ? '✓ APEX Pro — unlimited scans' : 'Free plan — 1 scan, limited report';
+    document.getElementById('am-upgrade-btn').style.display = isPro ? 'none' : 'block';
+    document.getElementById('account-overlay').classList.add('active');
+  }
+
+  function closeAccount() {
+    document.getElementById('account-overlay').classList.remove('active');
+  }
+
+  async function logout() {
+    await sb.auth.signOut();
+    currentUser = null;
+    isPro = false;
+    renderAuthState();
+    closeAccount();
+  }
+
+  checkSession();
+
   let source = '', fileContent = '', scanData = null;
 
   function show(id) {
@@ -289,6 +465,14 @@
 
   async function runScan() {
     document.getElementById('err-box').style.display = 'none';
+
+    if (!currentUser) {
+      const err = document.getElementById('err-box');
+      err.textContent = '⚠ Please log in or sign up to run a health scan — it only takes a few seconds.';
+      err.style.display = 'block';
+      openAuth('signup');
+      return;
+    }
 
     const bizName = document.getElementById('biz-name').value.trim();
     const industry = document.getElementById('biz-industry').value;
@@ -354,7 +538,6 @@
     document.getElementById('r-badge').textContent = d.badge;
     drawRing(d.score);
 
-    // Populate hidden content behind paywall (still rendered in DOM for blur effect)
     const metricsEl = document.getElementById('r-metrics');
     if (metricsEl) {
       metricsEl.innerHTML = d.metrics.map(m => `
@@ -363,6 +546,12 @@
           <div class="metric-val">${m.value}</div>
           <div class="metric-trend trend-${m.type}">${m.type==='up'?'↑':m.type==='down'?'↓':'⚠'} ${m.trend}</div>
         </div>`).join('');
+    }
+
+    // Show lock overlay only for non-Pro users
+    const lockOverlay = document.querySelector('.lock-overlay');
+    if (lockOverlay) {
+      lockOverlay.style.display = isPro ? 'none' : 'flex';
     }
 
     show('s-results');
