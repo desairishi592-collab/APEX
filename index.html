@@ -523,8 +523,8 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const { data } = await sb.from('profiles').select('is_pro, scan_count, scan_limit_hit_at').eq('id', currentUser.id).single();
-    isPro = data?.is_pro || false;
+    const { data } = await sb.from('profiles').select('plan, scan_count, scan_limit_hit_at').eq('id', currentUser.id).single();
+    isPro = data?.plan === 'pro' || data?.plan === 'business';
     scanCount = data?.scan_count || 0;
     lastScanLimitHitAt = data?.scan_limit_hit_at || null;
   }
