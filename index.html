@@ -169,6 +169,24 @@
     .account-menu .am-status { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 1.25rem; }
     .account-menu .am-row { display: flex; gap: 8px; }
 
+    /* SCAN HISTORY MODAL */
+    .history-modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; max-width: 480px; width: 100%; max-height: 80vh; display: flex; flex-direction: column; }
+    .history-modal h2 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .history-sub { font-size: 12px; color: var(--muted); margin-bottom: 1.25rem; }
+    .history-list { overflow-y: auto; flex: 1; margin: 0 -0.5rem; padding: 0 0.5rem; }
+    .history-item { display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; border-radius: var(--radius-sm); }
+    .history-item:hover { background: var(--surface); }
+    .history-item:last-child { border-bottom: none; }
+    .history-score { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; flex-shrink: 0; border: 2px solid; }
+    .history-score.hs-good { color: var(--green); border-color: var(--green); }
+    .history-score.hs-warn { color: var(--amber); border-color: var(--amber); }
+    .history-score.hs-bad { color: var(--red); border-color: var(--red); }
+    .history-info { flex: 1; min-width: 0; }
+    .history-biz { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .history-empty { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
+    .history-loading { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
+
     @media (max-width: 540px) {
       .score-card { flex-direction: column; text-align: center; }
       .biz-grid { grid-template-columns: 1fr; }
@@ -207,10 +225,32 @@
     <div class="auth-switch" id="auth-switch">
       Don't have an account? <a onclick="openAuth('signup')">Sign up</a>
     </div>
+    <div class="auth-switch" id="auth-guest-row" style="margin-top: 6px;">
+      <a onclick="confirmGuest()">Continue without an account</a>
+    </div>
+  </div>
+</div>
+
+<!-- GUEST WARNING MODAL -->
+<div class="auth-overlay" id="guest-overlay">
+  <div class="auth-modal">
+    <button class="auth-close" onclick="closeGuestWarning()">✕</button>
+    <h2>Continue without an account?</h2>
+    <p class="auth-sub">You can run 1 free scan as a guest — no email needed. But heads up:</p>
+    <div class="pw-features" style="margin-bottom: 1.25rem;">
+      <div class="pw-feature" style="color: var(--text);">Your scan won't be saved anywhere</div>
+      <div class="pw-feature" style="color: var(--text);">You can't view it again later — no history</div>
+      <div class="pw-feature" style="color: var(--text);">Closing this tab loses your results for good</div>
+    </div>
+    <button class="btn btn-accent btn-full" onclick="startGuest()">Continue as guest</button>
+    <div class="auth-switch" style="margin-top: 10px;">
+      <a onclick="closeGuestWarning(); openAuth('signup')">Actually, let me sign up instead</a>
+    </div>
   </div>
 </div>
 
 <!-- ACCOUNT MODAL -->
+
 <div class="auth-overlay" id="account-overlay">
   <div class="account-menu">
     <button class="auth-close" onclick="closeAccount()">✕</button>
@@ -218,7 +258,20 @@
     <div class="am-status" id="am-status">—</div>
     <div class="am-row">
       <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:block;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
-      <button class="btn-outline" style="flex:1;" onclick="logout()">Log out</button>
+      <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">Scan history</button>
+    </div>
+    <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
+  </div>
+</div>
+
+<!-- SCAN HISTORY MODAL -->
+<div class="auth-overlay" id="history-overlay">
+  <div class="history-modal">
+    <button class="auth-close" onclick="closeHistory()">✕</button>
+    <h2>Scan history</h2>
+    <div class="history-sub">Your past business health scans.</div>
+    <div class="history-list" id="history-list">
+      <div class="history-loading">Loading scans…</div>
     </div>
   </div>
 </div>
@@ -287,6 +340,10 @@
       <button class="rescan-btn" onclick="goBack()">← Scan another business</button>
     </div>
 
+    <div class="err" id="guest-notice" style="display:none; background: var(--amber-dim); border-color: rgba(245,158,11,0.25); color: #fcd34d;">
+      ⚠ You're browsing as a guest — this report won't be saved. <a onclick="openAuth('signup')" style="color: #fcd34d; text-decoration: underline; cursor:pointer;">Sign up</a> to keep your scan history.
+    </div>
+
     <!-- FREE: Score always visible -->
     <div class="score-card">
       <div class="score-ring-wrap">
@@ -334,6 +391,11 @@
   let currentUser = null;
   let isPro = false;
   let authMode = 'login';
+  let scanCount = 0;
+  let isGuest = false;
+  let guestScanCount = 0;
+  const FREE_SCAN_LIMIT = 3;
+  const GUEST_SCAN_LIMIT = 1;
 
   async function checkSession() {
     const { data: { session } } = await sb.auth.getSession();
@@ -346,8 +408,9 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const { data } = await sb.from('profiles').select('is_pro').eq('id', currentUser.id).single();
+    const { data } = await sb.from('profiles').select('is_pro, scan_count').eq('id', currentUser.id).single();
     isPro = data?.is_pro || false;
+    scanCount = data?.scan_count || 0;
   }
 
   function renderAuthState() {
@@ -356,6 +419,11 @@
       navAuth.innerHTML = `
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
         ${isPro ? '<span class="pro-pill">PRO</span>' : ''}
+      `;
+    } else if (isGuest) {
+      navAuth.innerHTML = `
+        <span style="font-size:12px; color: var(--muted);">Browsing as guest</span>
+        <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')">Sign up</button>
       `;
     } else {
       navAuth.innerHTML = `
@@ -388,6 +456,21 @@
     document.getElementById('auth-overlay').classList.remove('active');
   }
 
+  function confirmGuest() {
+    closeAuth();
+    document.getElementById('guest-overlay').classList.add('active');
+  }
+
+  function closeGuestWarning() {
+    document.getElementById('guest-overlay').classList.remove('active');
+  }
+
+  function startGuest() {
+    isGuest = true;
+    closeGuestWarning();
+    renderAuthState();
+  }
+
   async function submitAuth() {
     const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
@@ -409,6 +492,7 @@
       }
       if (result.error) throw result.error;
       currentUser = result.data.user;
+      isGuest = false;
       await loadProfile();
       renderAuthState();
       closeAuth();
@@ -420,7 +504,10 @@
 
   function openAccount() {
     document.getElementById('am-email').textContent = currentUser.email;
-    document.getElementById('am-status').textContent = isPro ? '✓ APEX Pro — unlimited scans' : 'Free plan — 1 scan, limited report';
+    const scansLeft = Math.max(FREE_SCAN_LIMIT - scanCount, 0);
+    document.getElementById('am-status').textContent = isPro
+      ? '✓ APEX Pro — unlimited scans'
+      : `Free plan — ${scansLeft} scan${scansLeft === 1 ? '' : 's'} left`;
     document.getElementById('am-upgrade-btn').style.display = isPro ? 'none' : 'block';
     document.getElementById('account-overlay').classList.add('active');
   }
@@ -433,8 +520,70 @@
     await sb.auth.signOut();
     currentUser = null;
     isPro = false;
+    scanCount = 0;
     renderAuthState();
     closeAccount();
+  }
+
+  // ── SCAN HISTORY ──
+  function openHistory() {
+    closeAccount();
+    document.getElementById('history-overlay').classList.add('active');
+    loadHistory();
+  }
+
+  function closeHistory() {
+    document.getElementById('history-overlay').classList.remove('active');
+  }
+
+  async function loadHistory() {
+    const listEl = document.getElementById('history-list');
+    listEl.innerHTML = '<div class="history-loading">Loading scans…</div>';
+
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your scan history.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('scans')
+        .select('business_name, industry, score, status, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        listEl.innerHTML = '<div class="history-empty">No scans yet — run your first health scan to see it here.</div>';
+        return;
+      }
+
+      listEl.innerHTML = data.map(s => {
+        const score = s.score ?? 0;
+        const scoreClass = score >= 70 ? 'hs-good' : score >= 45 ? 'hs-warn' : 'hs-bad';
+        const date = new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const bizName = escapeHtml(s.business_name || 'Untitled scan');
+        const industry = escapeHtml(s.industry || '—');
+        return `
+          <div class="history-item">
+            <div class="history-score ${scoreClass}">${score}</div>
+            <div class="history-info">
+              <div class="history-biz">${bizName}</div>
+              <div class="history-meta">${industry} · ${date}</div>
+            </div>
+          </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load scan history. Please try again.</div>';
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   checkSession();
@@ -466,11 +615,27 @@
   async function runScan() {
     document.getElementById('err-box').style.display = 'none';
 
-    if (!currentUser) {
+    if (!currentUser && !isGuest) {
       const err = document.getElementById('err-box');
-      err.textContent = '⚠ Please log in or sign up to run a health scan — it only takes a few seconds.';
+      err.textContent = '⚠ Please log in, sign up, or continue as a guest to run a health scan.';
       err.style.display = 'block';
       openAuth('signup');
+      return;
+    }
+
+    // Scan gating: free logged-in users get FREE_SCAN_LIMIT total scans
+    if (currentUser && !isPro && scanCount >= FREE_SCAN_LIMIT) {
+      const err = document.getElementById('err-box');
+      err.innerHTML = `⚠ You've used all ${FREE_SCAN_LIMIT} free scans. <a href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" style="color: var(--accent); text-decoration: underline;">Upgrade to Pro</a> for unlimited scans.`;
+      err.style.display = 'block';
+      return;
+    }
+
+    // Scan gating: guests get GUEST_SCAN_LIMIT scan(s), unsaved
+    if (isGuest && guestScanCount >= GUEST_SCAN_LIMIT) {
+      const err = document.getElementById('err-box');
+      err.innerHTML = `⚠ You've used your free guest scan. <a onclick="closeGuestWarning(); openAuth('signup')" style="color: var(--accent); text-decoration: underline; cursor:pointer;">Sign up</a> to keep scanning and save your results.`;
+      err.style.display = 'block';
       return;
     }
 
@@ -523,11 +688,39 @@
       if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
       scanData = data;
       renderResults(data);
+      if (currentUser) {
+        await saveScanAndIncrement(bizName, industry, data);
+      } else if (isGuest) {
+        guestScanCount += 1;
+      }
     } catch(e) {
       show('s-connect');
       const err = document.getElementById('err-box');
       err.textContent = 'Something went wrong: ' + e.message;
       err.style.display = 'block';
+    }
+  }
+
+  // ── SAVE SCAN TO HISTORY + INCREMENT COUNT ──
+  async function saveScanAndIncrement(bizName, industry, data) {
+    if (!currentUser) return;
+    try {
+      await sb.from('scans').insert({
+        user_id: currentUser.id,
+        business_name: bizName,
+        industry: industry,
+        score: data.score,
+        status: data.status,
+        full_data: data
+      });
+
+      if (!isPro) {
+        scanCount += 1;
+        await sb.from('profiles').update({ scan_count: scanCount }).eq('id', currentUser.id);
+      }
+    } catch (e) {
+      // Non-fatal: scan results already shown to user even if save fails
+      console.error('Failed to save scan:', e);
     }
   }
 
@@ -537,6 +730,11 @@
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
     drawRing(d.score);
+
+    const guestNotice = document.getElementById('guest-notice');
+    if (guestNotice) {
+      guestNotice.style.display = (isGuest && !currentUser) ? 'block' : 'none';
+    }
 
     const metricsEl = document.getElementById('r-metrics');
     if (metricsEl) {
