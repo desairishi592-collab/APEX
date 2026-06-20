@@ -116,6 +116,12 @@
     .dr-label { color: var(--muted); } .dr-val { font-weight: 500; color: var(--text); }
     .dr-val.red { color: var(--red); } .dr-val.grn { color: var(--green); } .dr-val.amb { color: var(--amber); }
 
+    .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .trend-row:last-child { border-bottom: none; }
+    .trend-date { color: var(--muted); }
+    .trend-score { font-family: 'Space Grotesk', sans-serif; font-weight: 600; }
+    .trend-delta { font-size: 11px; margin-left: 8px; }
+
     .action-row { display: flex; gap: 10px; }
     .btn-outline { flex: 1; padding: 11px; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text); cursor: pointer; font-family: 'Inter', sans-serif; transition: border-color 0.15s; }
     .btn-outline:hover { border-color: var(--border-hover); }
@@ -301,31 +307,61 @@
       <p id="hero-sub">APEX scans your revenue, expenses, and team size to give you a health score, what's safe to pay your employees, and exactly where to cut costs — powered by AI, in seconds.</p>
     </div>
 
-    <span class="biz-label" id="biz-label-text">Tell APEX about your business</span>
-    <div class="biz-grid">
-      <input type="text" id="biz-name" placeholder="Business name" />
-      <select id="biz-industry">
-        <option value="">Industry</option>
-        <option>Banking / Finance</option>
-
-        <option>Retail</option>
-        <option>SaaS / Tech</option>
-        <option>Restaurant / Food</option>
-        <option>Consulting / Services</option>
-        <option>E-commerce</option>
-        <option>Construction / Trades</option>
-        <option>Healthcare</option>
-        <option>Manufacturing</option>
-        <option>Other</option>
-      </select>
-      <input type="text" id="biz-revenue" placeholder="Monthly revenue ($)" />
-      <input type="text" id="biz-expenses" placeholder="Monthly expenses ($)" />
-      <input type="text" id="biz-employees" placeholder="Number of employees" />
-      <input type="text" id="biz-age" placeholder="Years in business" />
+    <!-- INVESTOR-ONLY sub-toggle: private business vs public stock -->
+    <div class="mode-toggle" id="investor-subtoggle" style="display:none;">
+      <button class="mode-btn active" id="submode-btn-private" onclick="setInvestorSubMode('private')">Private business</button>
+      <button class="mode-btn" id="submode-btn-public" onclick="setInvestorSubMode('public')">Public stock</button>
     </div>
 
-    <button class="btn btn-accent btn-full" onclick="runScan()" id="run-scan-btn">Run health scan →</button>
-    <div class="err" id="err-box"></div>
+    <!-- PRIVATE BUSINESS / OWNER FORM -->
+    <div id="form-private">
+      <div class="drop-zone" onclick="document.getElementById('file-in').click()">
+        <span class="drop-icon">⬆️</span>
+        <div class="drop-title">Upload your bank statement, CSV, or Excel file</div>
+        <div class="drop-sub">Optional but recommended · Supports .csv, .xlsx, .pdf · Export from any bank or accounting tool</div>
+      </div>
+      <input type="file" id="file-in" accept=".csv,.xlsx,.pdf,.txt" style="display:none" onchange="onFile(this)" />
+      <div class="file-ok" id="file-ok">✓ <span id="file-name-label"></span> ready</div>
+
+      <span class="biz-label" id="biz-label-text">Tell APEX about your business</span>
+      <div class="biz-grid">
+        <input type="text" id="biz-name" placeholder="Business name" />
+        <select id="biz-industry">
+          <option value="">Industry</option>
+          <option>Banking / Finance</option>
+          <option>Retail</option>
+          <option>SaaS / Tech</option>
+          <option>Restaurant / Food</option>
+          <option>Consulting / Services</option>
+          <option>E-commerce</option>
+          <option>Construction / Trades</option>
+          <option>Healthcare</option>
+          <option>Manufacturing</option>
+          <option>Other</option>
+        </select>
+        <input type="text" id="biz-revenue" placeholder="Monthly revenue ($)" />
+        <input type="text" id="biz-expenses" placeholder="Monthly expenses ($)" />
+        <input type="text" id="biz-employees" placeholder="Number of employees" />
+        <input type="text" id="biz-age" placeholder="Years in business" />
+      </div>
+
+      <button class="btn btn-accent btn-full" onclick="runScan()" id="run-scan-btn">Run health scan →</button>
+      <div class="err" id="err-box"></div>
+    </div>
+
+    <!-- PUBLIC STOCK FORM (investor mode only) -->
+    <div id="form-public" style="display:none;">
+      <span class="biz-label">Tell APEX which stock to evaluate</span>
+      <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
+        <input type="text" id="stock-ticker" placeholder="Ticker symbol (e.g. AAPL)" />
+        <input type="text" id="stock-name" placeholder="Company name (optional)" />
+      </div>
+      <div class="err" id="stock-disclaimer" style="display:block; background: var(--amber-dim); border-color: rgba(245,158,11,0.25); color: #fcd34d;">
+        ⚠ APEX analyzes public stocks using AI knowledge, not a live market data feed — figures may be outdated or approximate. Always verify with a real-time source before investing.
+      </div>
+      <button class="btn btn-accent btn-full" onclick="runStockScan()" id="run-stock-btn" style="margin-top:1rem;">Run safety scan →</button>
+      <div class="err" id="stock-err-box"></div>
+    </div>
   </div>
 </div>
 
@@ -382,14 +418,31 @@
       </div>
     </div>
 
-    <!-- LOCKED: Metrics + employee pay + full cost plan -->
-    <div class="locked-section">
-      <div class="metrics-grid" id="r-metrics"></div>
+    <!-- FREE: the 4 key metrics — a real, complete snapshot, not a teaser -->
+    <div class="section-title">Key metrics</div>
+    <div class="metrics-grid" id="r-metrics"></div>
 
+    <!-- FREE (Pro only): score trend over time, shown once there's history to plot -->
+    <div class="dive-card" id="r-trend-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Score trend</div>
+        <div id="r-trend-rows"></div>
+      </div>
+    </div>
+
+    <!-- LOCKED: employee pay, industry comparison, full action plan -->
+    <div class="locked-section">
       <div class="dive-card" id="r-paycard">
         <div class="dive-body">
           <div class="section-title" id="r-pay-title">Employee pay benchmark</div>
           <div id="r-pay-rows"></div>
+        </div>
+      </div>
+
+      <div class="dive-card" id="r-industry-card">
+        <div class="dive-body">
+          <div class="section-title">How you compare to similar businesses</div>
+          <div id="r-industry-rows"></div>
         </div>
       </div>
 
@@ -408,11 +461,12 @@
         <div class="paywall-card">
           <div class="pw-icon">🔒</div>
           <h3 id="pw-title">Unlock your full report</h3>
-          <p id="pw-sub">Your score and top opportunity are free. Pro shows you everything else.</p>
+          <p id="pw-sub">Your score, key metrics, and top opportunity are free. Pro shows you everything else.</p>
           <div class="pw-features" id="pw-features">
-            <div class="pw-feature">Key metrics — cash runway, burn rate, margins</div>
             <div class="pw-feature">Employee pay benchmark vs. your industry</div>
+            <div class="pw-feature">How you compare to similar businesses</div>
             <div class="pw-feature">Full prioritized cost-cutting plan, not just the top one</div>
+            <div class="pw-feature">Score trend over time as you rescan</div>
             <div class="pw-feature">PDF export of your report</div>
             <div class="pw-feature">Unlimited scans, no waiting</div>
           </div>
@@ -467,11 +521,12 @@
       payTitle: "Employee pay benchmark",
       cutTitle: "Full cost-cutting plan",
       pwTitle: "Unlock your full report",
-      pwSub: "Your score and top opportunity are free. Pro shows you everything else.",
+      pwSub: "Your score, key metrics, and top opportunity are free. Pro shows you everything else.",
       pwFeatures: [
-        "Key metrics — cash runway, burn rate, margins",
         "Employee pay benchmark vs. your industry",
+        "How you compare to similar businesses",
         "Full prioritized cost-cutting plan, not just the top one",
+        "Score trend over time as you rescan",
         "PDF export of your report",
         "Unlimited scans, no waiting"
       ],
@@ -487,17 +542,20 @@
       payTitle: "Employee pay vs. industry",
       cutTitle: "Full risk breakdown",
       pwTitle: "Unlock the full risk analysis",
-      pwSub: "Your safety score and top red flag are free. Pro shows you everything else before you invest.",
+      pwSub: "Your safety score, key metrics, and top red flag are free. Pro shows you everything else before you invest.",
       pwFeatures: [
-        "Key metrics — cash runway, burn rate, margins",
         "Employee pay vs. industry — is the team underpaid or overpaid?",
+        "How this business compares to similar ones",
         "Full prioritized list of risks, not just the top one",
+        "Safety score trend over time, if you check back in",
         "PDF export to share with co-investors",
         "Unlimited scans, no waiting"
       ],
       loadingTitle: "Evaluating this business"
     }
   };
+
+  let investorSubMode = 'private'; // 'private' | 'public'
 
   function setMode(mode) {
     scanMode = mode;
@@ -510,6 +568,25 @@
     document.getElementById('biz-label-text').textContent = c.bizLabel;
     document.getElementById('run-scan-btn').textContent = c.runBtn;
     document.getElementById('loading-title').textContent = c.loadingTitle;
+
+    document.getElementById('investor-subtoggle').style.display = mode === 'investor' ? 'flex' : 'none';
+
+    if (mode === 'owner') {
+      // Owner mode always uses the private business form
+      setInvestorSubMode('private');
+    } else {
+      setInvestorSubMode(investorSubMode);
+    }
+  }
+
+  function setInvestorSubMode(sub) {
+    investorSubMode = sub;
+    document.getElementById('submode-btn-private').classList.toggle('active', sub === 'private');
+    document.getElementById('submode-btn-public').classList.toggle('active', sub === 'public');
+
+    const showPublicForm = (scanMode === 'investor' && sub === 'public');
+    document.getElementById('form-private').style.display = showPublicForm ? 'none' : 'block';
+    document.getElementById('form-public').style.display = showPublicForm ? 'block' : 'none';
   }
 
   async function checkSession() {
@@ -729,10 +806,62 @@
     return div.innerHTML;
   }
 
+  // ── PRO: SCORE TREND ──
+  // Shows past scores for the same business name, so Pro users can see if they're improving.
+  async function loadScoreTrend(bizName) {
+    const trendCard = document.getElementById('r-trend-card');
+    const trendRows = document.getElementById('r-trend-rows');
+    if (!trendCard || !trendRows) return;
+
+    if (!effectiveIsPro() || !currentUser || !bizName) {
+      trendCard.style.display = 'none';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('scans')
+        .select('score, created_at')
+        .eq('user_id', currentUser.id)
+        .eq('business_name', bizName)
+        .order('created_at', { ascending: false })
+        .limit(6);
+
+      if (error) throw error;
+
+      // Need at least 2 past scans of the same business to show a meaningful trend
+      if (!data || data.length < 2) {
+        trendCard.style.display = 'none';
+        return;
+      }
+
+      trendRows.innerHTML = data.map((s, i) => {
+        const date = new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const prev = data[i + 1];
+        let deltaHtml = '';
+        if (prev) {
+          const delta = s.score - prev.score;
+          const deltaClass = delta > 0 ? 'grn' : delta < 0 ? 'red' : 'amb';
+          const sign = delta > 0 ? '+' : '';
+          deltaHtml = `<span class="trend-delta dr-val ${deltaClass}">${sign}${delta}</span>`;
+        }
+        return `
+          <div class="trend-row">
+            <span class="trend-date">${date}</span>
+            <span><span class="trend-score">${s.score}/100</span>${deltaHtml}</span>
+          </div>`;
+      }).join('');
+
+      trendCard.style.display = 'block';
+    } catch (e) {
+      trendCard.style.display = 'none';
+    }
+  }
+
   checkSession();
   setMode('owner');
 
-  let source = '', scanData = null;
+  let source = '', scanData = null, currentScanBizName = '';
 
   function show(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -740,25 +869,38 @@
     window.scrollTo(0, 0);
   }
 
-  async function runScan() {
-    document.getElementById('err-box').style.display = 'none';
+  let fileContent = '';
+
+  function onFile(inp) {
+    const f = inp.files[0]; if (!f) return;
+    source = 'Uploaded: ' + f.name;
+    document.getElementById('file-name-label').textContent = f.name;
+    document.getElementById('file-ok').style.display = 'block';
+    const reader = new FileReader();
+    reader.onload = e => { fileContent = e.target.result.slice(0, 4000); };
+    reader.readAsText(f);
+  }
+
+  // Returns true if the scan is allowed to proceed; shows the right error and returns false otherwise.
+  // errBoxId lets the private and public stock forms show errors in their own error box.
+  async function checkScanAllowed(errBoxId) {
+    const errEl = document.getElementById(errBoxId);
+    errEl.style.display = 'none';
 
     if (!currentUser && !isGuest) {
-      const err = document.getElementById('err-box');
-      err.textContent = '⚠ Please log in, sign up, or continue as a guest to run a health scan.';
-      err.style.display = 'block';
+      errEl.textContent = '⚠ Please log in, sign up, or continue as a guest to run a health scan.';
+      errEl.style.display = 'block';
       openAuth('signup');
-      return;
+      return false;
     }
 
     // Scan gating: free logged-in users get FREE_SCAN_LIMIT scans, then a wait window (unless Pro/preview)
     if (currentUser && !effectiveIsPro() && scanCount >= FREE_SCAN_LIMIT) {
       const remaining = waitTimeRemaining();
-      const err = document.getElementById('err-box');
       if (remaining) {
-        err.innerHTML = `⚠ You're out of free scans. Wait ${remaining}, or <a href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" style="color: var(--accent); text-decoration: underline;">upgrade to Pro</a> for unlimited scans now.`;
-        err.style.display = 'block';
-        return;
+        errEl.innerHTML = `⚠ You're out of free scans. Wait ${remaining}, or <a href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" style="color: var(--accent); text-decoration: underline;">upgrade to Pro</a> for unlimited scans now.`;
+        errEl.style.display = 'block';
+        return false;
       } else {
         // Wait window has passed — reset and let them scan again
         scanCount = 0;
@@ -769,11 +911,16 @@
 
     // Scan gating: guests get GUEST_SCAN_LIMIT scan(s), unsaved
     if (isGuest && guestScanCount >= GUEST_SCAN_LIMIT) {
-      const err = document.getElementById('err-box');
-      err.innerHTML = `⚠ You've used your free guest scan. <a onclick="closeGuestWarning(); openAuth('signup')" style="color: var(--accent); text-decoration: underline; cursor:pointer;">Sign up</a> to keep scanning and save your results.`;
-      err.style.display = 'block';
-      return;
+      errEl.innerHTML = `⚠ You've used your free guest scan. <a onclick="closeGuestWarning(); openAuth('signup')" style="color: var(--accent); text-decoration: underline; cursor:pointer;">Sign up</a> to keep scanning and save your results.`;
+      errEl.style.display = 'block';
+      return false;
     }
+
+    return true;
+  }
+
+  async function runScan() {
+    if (!(await checkScanAllowed('err-box'))) return;
 
     const bizName = document.getElementById('biz-name').value.trim();
     const industry = document.getElementById('biz-industry').value;
@@ -822,6 +969,7 @@
           employees,
           age,
           source: source || 'manual entry',
+          fileContent,
           mode: scanMode
         })
       });
@@ -829,6 +977,7 @@
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
       scanData = data;
+      currentScanBizName = bizName;
       renderResults(data);
       if (currentUser) {
         await saveScanAndIncrement(bizName, industry, data);
@@ -838,6 +987,58 @@
     } catch(e) {
       show('s-connect');
       const err = document.getElementById('err-box');
+      err.textContent = 'Something went wrong: ' + e.message;
+      err.style.display = 'block';
+    }
+  }
+
+  // ── PUBLIC STOCK SCAN (investor mode only) ──
+  async function runStockScan() {
+    if (!(await checkScanAllowed('stock-err-box'))) return;
+
+    const ticker = document.getElementById('stock-ticker').value.trim();
+    const companyName = document.getElementById('stock-name').value.trim();
+
+    document.getElementById('stock-ticker').style.borderColor = '';
+
+    if (!ticker) {
+      document.getElementById('stock-ticker').style.borderColor = '#ef4444';
+      const err = document.getElementById('stock-err-box');
+      err.textContent = '⚠ Please enter a ticker symbol before running the scan.';
+      err.style.display = 'block';
+      return;
+    }
+
+    show('s-loading');
+    ['st1','st2','st3','st4','st5'].forEach((id, i) => {
+      setTimeout(() => document.getElementById(id).classList.add('done'), 700 + i * 800);
+    });
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stockTicker: ticker,
+          stockCompanyName: companyName,
+          mode: 'investor',
+          subMode: 'public'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
+      scanData = data;
+      currentScanBizName = companyName || ticker;
+      renderResults(data);
+      if (currentUser) {
+        await saveScanAndIncrement(companyName || ticker, 'Public stock', data);
+      } else if (isGuest) {
+        guestScanCount += 1;
+      }
+    } catch(e) {
+      show('s-connect');
+      const err = document.getElementById('stock-err-box');
       err.textContent = 'Something went wrong: ' + e.message;
       err.style.display = 'block';
     }
@@ -911,14 +1112,30 @@
         </div>`).join('');
     }
 
-    // PRO: employee pay benchmark
+    // PRO: employee pay benchmark (not applicable to public stock scans)
+    const payCard = document.getElementById('r-paycard');
     const payRows = document.getElementById('r-pay-rows');
-    if (payRows) {
-      payRows.innerHTML = (d.payBenchmark || []).map(r => `
+    if (payCard && payRows) {
+      if (d.isPublicStock) {
+        payCard.style.display = 'none';
+      } else {
+        payCard.style.display = 'block';
+        payRows.innerHTML = (d.payBenchmark || []).map(r => `
+          <div class="dive-row">
+            <span class="dr-label">${r.role}</span>
+            <span class="dr-val ${r.color || ''}">${r.value}</span>
+          </div>`).join('') || '<div class="dive-row"><span class="dr-label">No role data available</span></div>';
+      }
+    }
+
+    // PRO: industry comparison
+    const industryRows = document.getElementById('r-industry-rows');
+    if (industryRows) {
+      industryRows.innerHTML = (d.industryComparison || []).map(r => `
         <div class="dive-row">
-          <span class="dr-label">${r.role}</span>
+          <span class="dr-label">${r.label}</span>
           <span class="dr-val ${r.color || ''}">${r.value}</span>
-        </div>`).join('') || '<div class="dive-row"><span class="dr-label">No role data available</span></div>';
+        </div>`).join('') || '<div class="dive-row"><span class="dr-label">No comparison data available</span></div>';
     }
 
     // PRO: full cost-cutting / risk plan (all items, including the free top one)
@@ -931,11 +1148,15 @@
         </div>`).join('') || '<div class="dive-row"><span class="dr-label">No cuts recommended</span></div>';
     }
 
+    // PRO: score trend over time for this business (only shown if there's history)
+    loadScoreTrend(currentScanBizName);
+
     // Show lock overlay only for non-Pro users (real Pro or dev preview unlocks it)
     const lockOverlay = document.querySelector('.lock-overlay');
     if (lockOverlay) {
       lockOverlay.style.display = effectiveIsPro() ? 'none' : 'flex';
     }
+
 
     show('s-results');
   }
@@ -973,8 +1194,14 @@
   }
 
   function goBack() {
-    source = ''; scanData = null;
+    source = ''; scanData = null; fileContent = '';
+    const fileInput = document.getElementById('file-in');
+    if (fileInput) fileInput.value = '';
+    const fileOk = document.getElementById('file-ok');
+    if (fileOk) fileOk.style.display = 'none';
     document.querySelectorAll('.step-list li').forEach(li => li.classList.remove('done'));
+    document.getElementById('stock-ticker').value = '';
+    document.getElementById('stock-name').value = '';
     show('s-connect');
   }
 </script>
