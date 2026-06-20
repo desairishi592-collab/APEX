@@ -35,6 +35,11 @@
     .connect-hero h1 { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
     .connect-hero p { font-size: 15px; color: var(--muted); line-height: 1.7; max-width: 460px; margin: 0 auto; }
 
+    .mode-toggle { display: flex; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; margin-bottom: 2rem; }
+    .mode-btn { flex: 1; padding: 10px 14px; background: transparent; border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif; transition: background 0.15s, color 0.15s; }
+    .mode-btn:hover { color: var(--text); }
+    .mode-btn.active { background: var(--accent); color: #fff; }
+
     .drop-zone { border: 1px dashed var(--border-hover); border-radius: var(--radius); padding: 2rem; text-align: center; cursor: pointer; transition: background 0.15s; margin-bottom: 1.5rem; }
     .drop-zone:hover { background: var(--card); border-color: var(--accent); }
     .drop-icon { font-size: 28px; margin-bottom: 8px; display: block; color: var(--muted); }
@@ -184,6 +189,9 @@
     .history-info { flex: 1; min-width: 0; }
     .history-biz { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .history-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .history-mode-tag { font-size: 10px; padding: 2px 7px; border-radius: 20px; font-weight: 500; flex-shrink: 0; }
+    .history-mode-tag.owner { background: var(--accent-dim); color: var(--accent); }
+    .history-mode-tag.investor { background: var(--green-dim); color: var(--green); }
     .history-empty { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
     .history-loading { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
 
@@ -283,17 +291,23 @@
 <!-- SCREEN 1: CONNECT -->
 <div class="screen active" id="s-connect">
   <div class="connect-wrap">
-    <div class="connect-hero">
-      <h1>Know your business health before it's too late</h1>
-      <p>APEX scans your revenue, expenses, and team size to give you a health score, what's safe to pay your employees, and exactly where to cut costs — powered by AI, in seconds.</p>
+    <div class="mode-toggle" id="mode-toggle">
+      <button class="mode-btn active" id="mode-btn-owner" onclick="setMode('owner')">I run this business</button>
+      <button class="mode-btn" id="mode-btn-investor" onclick="setMode('investor')">I'm evaluating an investment</button>
     </div>
 
-    <span class="biz-label">Tell APEX about your business</span>
+    <div class="connect-hero">
+      <h1 id="hero-title">Know your business health before it's too late</h1>
+      <p id="hero-sub">APEX scans your revenue, expenses, and team size to give you a health score, what's safe to pay your employees, and exactly where to cut costs — powered by AI, in seconds.</p>
+    </div>
+
+    <span class="biz-label" id="biz-label-text">Tell APEX about your business</span>
     <div class="biz-grid">
       <input type="text" id="biz-name" placeholder="Business name" />
       <select id="biz-industry">
         <option value="">Industry</option>
         <option>Banking / Finance</option>
+
         <option>Retail</option>
         <option>SaaS / Tech</option>
         <option>Restaurant / Food</option>
@@ -310,7 +324,7 @@
       <input type="text" id="biz-age" placeholder="Years in business" />
     </div>
 
-    <button class="btn btn-accent btn-full" onclick="runScan()">Run health scan →</button>
+    <button class="btn btn-accent btn-full" onclick="runScan()" id="run-scan-btn">Run health scan →</button>
     <div class="err" id="err-box"></div>
   </div>
 </div>
@@ -319,7 +333,7 @@
 <div class="screen" id="s-loading">
   <div class="loading-wrap">
     <div class="loader"></div>
-    <h2>Scanning your business</h2>
+    <h2 id="loading-title">Scanning your business</h2>
     <p>AI is analyzing your financials...</p>
     <ul class="step-list" id="step-list">
       <li id="st1"><span class="step-dot"></span> Parsing financial data</li>
@@ -335,7 +349,7 @@
 <div class="screen" id="s-results">
   <div class="results-wrap">
     <div class="results-header">
-      <h2>Health report</h2>
+      <h2 id="results-title">Health report</h2>
       <button class="rescan-btn" onclick="goBack()">← Scan another business</button>
     </div>
 
@@ -359,11 +373,11 @@
       </div>
     </div>
 
-    <!-- FREE: top "what to cut" headline, always visible -->
+    <!-- FREE: top headline, always visible — wording depends on mode -->
     <div class="card" id="r-top-cut" style="background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display:flex; gap:12px; align-items:flex-start;">
-      <div class="insight-ico ico-warn">✂️</div>
+      <div class="insight-ico ico-warn" id="r-top-cut-ico">✂️</div>
       <div>
-        <div class="insight-body ib-title">Biggest opportunity: <span id="r-top-cut-title">—</span></div>
+        <div class="insight-body ib-title"><span id="r-top-cut-label">Biggest opportunity:</span> <span id="r-top-cut-title">—</span></div>
         <div class="insight-body ib-desc" id="r-top-cut-desc">—</div>
       </div>
     </div>
@@ -374,14 +388,14 @@
 
       <div class="dive-card" id="r-paycard">
         <div class="dive-body">
-          <div class="section-title">Employee pay benchmark</div>
+          <div class="section-title" id="r-pay-title">Employee pay benchmark</div>
           <div id="r-pay-rows"></div>
         </div>
       </div>
 
       <div class="dive-card" id="r-cutcard">
         <div class="dive-body">
-          <div class="section-title">Full cost-cutting plan</div>
+          <div class="section-title" id="r-cut-title">Full cost-cutting plan</div>
           <div id="r-cut-rows"></div>
         </div>
       </div>
@@ -393,9 +407,9 @@
       <div class="lock-overlay">
         <div class="paywall-card">
           <div class="pw-icon">🔒</div>
-          <h3>Unlock your full report</h3>
-          <p>Your score and top opportunity are free. Pro shows you everything else.</p>
-          <div class="pw-features">
+          <h3 id="pw-title">Unlock your full report</h3>
+          <p id="pw-sub">Your score and top opportunity are free. Pro shows you everything else.</p>
+          <div class="pw-features" id="pw-features">
             <div class="pw-feature">Key metrics — cash runway, burn rate, margins</div>
             <div class="pw-feature">Employee pay benchmark vs. your industry</div>
             <div class="pw-feature">Full prioritized cost-cutting plan, not just the top one</div>
@@ -424,6 +438,7 @@
   let guestScanCount = 0;
   let previewPro = false;
   let lastScanLimitHitAt = null;
+  let scanMode = 'owner'; // 'owner' | 'investor'
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
@@ -438,6 +453,63 @@
     document.getElementById('preview-pro-btn').textContent = previewPro ? 'On' : 'Off';
     openAccount();
     if (scanData) renderResults(scanData);
+  }
+
+  // ── MODE: owner vs investor ──
+  const MODE_COPY = {
+    owner: {
+      heroTitle: "Know your business health before it's too late",
+      heroSub: "APEX scans your revenue, expenses, and team size to give you a health score, what's safe to pay your employees, and exactly where to cut costs — powered by AI, in seconds.",
+      bizLabel: "Tell APEX about your business",
+      runBtn: "Run health scan →",
+      resultsTitle: "Health report",
+      topCutLabel: "Biggest opportunity:",
+      payTitle: "Employee pay benchmark",
+      cutTitle: "Full cost-cutting plan",
+      pwTitle: "Unlock your full report",
+      pwSub: "Your score and top opportunity are free. Pro shows you everything else.",
+      pwFeatures: [
+        "Key metrics — cash runway, burn rate, margins",
+        "Employee pay benchmark vs. your industry",
+        "Full prioritized cost-cutting plan, not just the top one",
+        "PDF export of your report",
+        "Unlimited scans, no waiting"
+      ],
+      loadingTitle: "Scanning your business"
+    },
+    investor: {
+      heroTitle: "Know if it's safe to invest before you wire the money",
+      heroSub: "APEX scans a business's revenue, expenses, and team size to give you a safety score, the biggest red flag, and what to ask before you invest — powered by AI, in seconds.",
+      bizLabel: "Tell APEX about the business you're evaluating",
+      runBtn: "Run safety scan →",
+      resultsTitle: "Investment safety report",
+      topCutLabel: "Biggest red flag:",
+      payTitle: "Employee pay vs. industry",
+      cutTitle: "Full risk breakdown",
+      pwTitle: "Unlock the full risk analysis",
+      pwSub: "Your safety score and top red flag are free. Pro shows you everything else before you invest.",
+      pwFeatures: [
+        "Key metrics — cash runway, burn rate, margins",
+        "Employee pay vs. industry — is the team underpaid or overpaid?",
+        "Full prioritized list of risks, not just the top one",
+        "PDF export to share with co-investors",
+        "Unlimited scans, no waiting"
+      ],
+      loadingTitle: "Evaluating this business"
+    }
+  };
+
+  function setMode(mode) {
+    scanMode = mode;
+    document.getElementById('mode-btn-owner').classList.toggle('active', mode === 'owner');
+    document.getElementById('mode-btn-investor').classList.toggle('active', mode === 'investor');
+
+    const c = MODE_COPY[mode];
+    document.getElementById('hero-title').textContent = c.heroTitle;
+    document.getElementById('hero-sub').textContent = c.heroSub;
+    document.getElementById('biz-label-text').textContent = c.bizLabel;
+    document.getElementById('run-scan-btn').textContent = c.runBtn;
+    document.getElementById('loading-title').textContent = c.loadingTitle;
   }
 
   async function checkSession() {
@@ -616,7 +688,7 @@
     try {
       const { data, error } = await sb
         .from('scans')
-        .select('business_name, industry, score, status, created_at')
+        .select('business_name, industry, score, status, created_at, mode')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -634,6 +706,8 @@
         const date = new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const bizName = escapeHtml(s.business_name || 'Untitled scan');
         const industry = escapeHtml(s.industry || '—');
+        const mode = s.mode === 'investor' ? 'investor' : 'owner';
+        const modeLabel = mode === 'investor' ? 'Investor' : 'Owner';
         return `
           <div class="history-item">
             <div class="history-score ${scoreClass}">${score}</div>
@@ -641,6 +715,7 @@
               <div class="history-biz">${bizName}</div>
               <div class="history-meta">${industry} · ${date}</div>
             </div>
+            <span class="history-mode-tag ${mode}">${modeLabel}</span>
           </div>`;
       }).join('');
     } catch (e) {
@@ -655,6 +730,7 @@
   }
 
   checkSession();
+  setMode('owner');
 
   let source = '', scanData = null;
 
@@ -745,7 +821,8 @@
           expenses,
           employees,
           age,
-          source: source || 'manual entry'
+          source: source || 'manual entry',
+          mode: scanMode
         })
       });
 
@@ -776,7 +853,8 @@
         industry: industry,
         score: data.score,
         status: data.status,
-        full_data: data
+        full_data: data,
+        mode: scanMode
       });
 
       // Only real Pro skips the counter — preview-Pro is a dev view only, doesn't change billing state
@@ -796,8 +874,19 @@
   }
 
   function renderResults(d) {
+    const c = MODE_COPY[scanMode];
+
+    document.getElementById('results-title').textContent = c.resultsTitle;
+    document.getElementById('r-top-cut-label').textContent = c.topCutLabel;
+    document.getElementById('r-top-cut-ico').textContent = scanMode === 'investor' ? '🚩' : '✂️';
+    document.getElementById('r-pay-title').textContent = c.payTitle;
+    document.getElementById('r-cut-title').textContent = c.cutTitle;
+    document.getElementById('pw-title').textContent = c.pwTitle;
+    document.getElementById('pw-sub').textContent = c.pwSub;
+    document.getElementById('pw-features').innerHTML = c.pwFeatures.map(f => `<div class="pw-feature">${f}</div>`).join('');
+
     document.getElementById('r-score').textContent = d.score;
-    document.getElementById('r-status').textContent = 'Health: ' + d.status;
+    document.getElementById('r-status').textContent = (scanMode === 'investor' ? 'Safety: ' : 'Health: ') + d.status;
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
     drawRing(d.score);
@@ -807,9 +896,9 @@
       guestNotice.style.display = (isGuest && !currentUser) ? 'block' : 'none';
     }
 
-    // FREE: top cost-cutting headline (first item of the cut plan, always shown)
+    // FREE: top headline (first item of the cut/risk list, always shown)
     const topCut = (d.costCuts && d.costCuts[0]) || null;
-    document.getElementById('r-top-cut-title').textContent = topCut ? topCut.title : 'No major cuts found';
+    document.getElementById('r-top-cut-title').textContent = topCut ? topCut.title : (scanMode === 'investor' ? 'No major red flags found' : 'No major cuts found');
     document.getElementById('r-top-cut-desc').textContent = topCut ? topCut.desc : 'Your spending looks reasonable for your revenue.';
 
     const metricsEl = document.getElementById('r-metrics');
@@ -832,13 +921,13 @@
         </div>`).join('') || '<div class="dive-row"><span class="dr-label">No role data available</span></div>';
     }
 
-    // PRO: full cost-cutting plan (all items, including the free top one)
+    // PRO: full cost-cutting / risk plan (all items, including the free top one)
     const cutRows = document.getElementById('r-cut-rows');
     if (cutRows) {
-      cutRows.innerHTML = (d.costCuts || []).map(c => `
+      cutRows.innerHTML = (d.costCuts || []).map(item => `
         <div class="dive-row">
-          <span class="dr-label">${c.title}</span>
-          <span class="dr-val ${c.color || ''}">${c.desc}</span>
+          <span class="dr-label">${item.title}</span>
+          <span class="dr-val ${item.color || ''}">${item.desc}</span>
         </div>`).join('') || '<div class="dive-row"><span class="dr-label">No cuts recommended</span></div>';
     }
 
