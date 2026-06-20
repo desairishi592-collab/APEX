@@ -2,105 +2,99 @@ export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
-    return new Response('Method not allowed', { status: 405 });
-  }
-
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) {
-    return new Response(JSON.stringify({ error: 'API key not configured' }), {
-      status: 500, headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
 
   try {
-    const body = await req.json();
-    const { bizName, industry, revenue, age, source, fileContent } = body;
+    const { bizName, industry, revenue, expenses, employees, age, source } = await req.json();
 
-    const prompt = `You are APEX, an expert business health analyst AI. Analyze the business below and return ONLY a raw JSON object — no markdown, no backticks, no explanation. Just the JSON.
+    if (!bizName || !industry || !revenue || !expenses || !employees || !age) {
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 });
+    }
 
-Business name: ${bizName || 'This Business'}
-Industry: ${industry || 'General'}
-Monthly revenue: $${revenue || 'not provided'}
-Years in business: ${age || 'not provided'}
+    const prompt = `You are a business financial health analyst. Analyze this business and return ONLY valid JSON, no preamble, no markdown fences, nothing else.
+
+Business name: ${bizName}
+Industry: ${industry}
+Monthly revenue: $${revenue}
+Monthly expenses: $${expenses}
+Number of employees: ${employees}
+Years in business: ${age}
 Data source: ${source || 'manual entry'}
-${fileContent ? 'Financial data:\n' + fileContent.slice(0, 2000) : ''}
 
-Return exactly this structure:
+Return JSON in EXACTLY this shape:
+
 {
-  "score": <integer 0-100>,
-  "status": "<Critical|Poor|Fair|Good|Excellent>",
-  "summary": "<2 sentences about overall business health>",
-  "badge": "<short note like 'First scan — baseline set' or '+4 pts from industry avg'>",
+  "score": <integer 0-100, overall business health>,
+  "status": <"Excellent" | "Healthy" | "At Risk" | "Critical">,
+  "summary": <1-2 sentence plain-English summary of the business's financial health>,
+  "badge": <short 2-4 word badge, e.g. "Strong margins" or "Cash flow risk">,
   "metrics": [
-    {"label": "Cash runway", "value": "<X mo>", "trend": "<short note>", "type": "<up|down|warn>"},
-    {"label": "Monthly revenue", "value": "$<amount>", "trend": "<short note>", "type": "<up|down|warn>"},
-    {"label": "Burn rate", "value": "$<amount>", "trend": "<short note>", "type": "<up|down|warn>"},
-    {"label": "Gross margin", "value": "<X%>", "trend": "<short note>", "type": "<up|down|warn>"}
+    { "label": "Cash Runway", "value": "<e.g. '4.2 months'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
+    { "label": "Burn Rate", "value": "<e.g. '$12,400/mo'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
+    { "label": "Profit Margin", "value": "<e.g. '18%'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
+    { "label": "Revenue per Employee", "value": "<e.g. '$8,200/mo'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" }
   ],
-  "insights": [
-    {"title": "<issue>", "desc": "<2 sentence explanation>", "level": "<danger|warn|good>"},
-    {"title": "<issue>", "desc": "<2 sentence explanation>", "level": "<danger|warn|good>"},
-    {"title": "<issue>", "desc": "<2 sentence explanation>", "level": "<danger|warn|good>"}
+  "payBenchmark": [
+    { "role": "<a role likely present given the industry and employee count, e.g. 'Store Manager'>", "value": "<industry-typical pay range, e.g. '$48k–$58k/yr — you're paying within range'>", "color": "grn"|"amb"|"red" },
+    { "role": "<another likely role>", "value": "<pay assessment>", "color": "grn"|"amb"|"red" },
+    { "role": "<another likely role>", "value": "<pay assessment>", "color": "grn"|"amb"|"red" }
   ],
-  "cash": [
-    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
-    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
-    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
-    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"},
-    {"label": "<label>", "value": "<value>", "color": "<red|grn|amb|>"}
-  ],
-  "expenses": [
-    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
-    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
-    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
-    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"},
-    {"label": "<category>", "value": "<amount>", "color": "<red|grn|amb|>"}
-  ],
-  "risk": [
-    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
-    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
-    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
-    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"},
-    {"label": "<risk factor>", "value": "<status>", "color": "<red|grn|amb|>"}
+  "costCuts": [
+    { "title": "<short headline of the #1 biggest cost-cutting opportunity, e.g. 'Reduce subscription software spend'>", "desc": "<1 sentence explaining the cut and estimated monthly savings>", "color": "red"|"amb"|"grn" },
+    { "title": "<2nd opportunity>", "desc": "<explanation + estimated savings>", "color": "red"|"amb"|"grn" },
+    { "title": "<3rd opportunity>", "desc": "<explanation + estimated savings>", "color": "red"|"amb"|"grn" }
   ]
-}`;
+}
+
+Rules:
+- "costCuts" MUST be ordered with the single biggest/most important opportunity first — that first item is shown to free users as the headline, so make it the most actionable one.
+- "payBenchmark" should reflect realistic, industry-typical roles for a ${industry} business with ${employees} employees — infer likely roles (e.g. retail: cashier, store manager; restaurant: server, chef; SaaS: engineer, support).
+- Base numbers on the revenue, expenses, and employee count given. Be realistic, not generic.
+- Return ONLY the JSON object. No explanation, no markdown code fences.`;
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer ' + groqKey,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 1400,
-        temperature: 0.3,
-        messages: [{ role: 'user', content: prompt }]
+        messages: [
+          { role: 'system', content: 'You return only valid JSON. Never include markdown formatting, code fences, or explanation text outside the JSON object.' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.4,
+        response_format: { type: 'json_object' }
       })
     });
 
     if (!groqRes.ok) {
-      const err = await groqRes.json();
-      return new Response(JSON.stringify({ error: err.error?.message || 'Groq error' }), {
-        status: 500, headers: { 'Content-Type': 'application/json' }
-      });
+      const errText = await groqRes.text();
+      return new Response(JSON.stringify({ error: 'AI analysis failed', detail: errText }), { status: 502 });
     }
 
-    const data = await groqRes.json();
-    const raw = data.choices[0].message.content.trim().replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(raw);
+    const groqData = await groqRes.json();
+    const raw = groqData.choices?.[0]?.message?.content;
+
+    if (!raw) {
+      return new Response(JSON.stringify({ error: 'Empty response from AI' }), { status: 502 });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'AI returned invalid JSON' }), { status: 502 });
+    }
 
     return new Response(JSON.stringify(parsed), {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
+      headers: { 'Content-Type': 'application/json' }
     });
 
   } catch (e) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(JSON.stringify({ error: e.message || 'Unexpected server error' }), { status: 500 });
   }
 }
