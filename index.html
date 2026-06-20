@@ -261,6 +261,10 @@
       <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">Scan history</button>
     </div>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
+      <span style="font-size:11px; color: var(--dim);">Dev: preview Pro view</span>
+      <button class="btn-outline" style="padding:5px 12px; font-size:11px;" onclick="togglePreviewPro()" id="preview-pro-btn">Off</button>
+    </div>
   </div>
 </div>
 
@@ -281,22 +285,15 @@
   <div class="connect-wrap">
     <div class="connect-hero">
       <h1>Know your business health before it's too late</h1>
-      <p>APEX scans your real financial data and gives you a health score, key risks, and a full deep-dive report — powered by AI, in seconds.</p>
+      <p>APEX scans your revenue, expenses, and team size to give you a health score, what's safe to pay your employees, and exactly where to cut costs — powered by AI, in seconds.</p>
     </div>
-
-    <div class="drop-zone" onclick="document.getElementById('file-in').click()">
-      <span class="drop-icon">⬆️</span>
-      <div class="drop-title">Upload your bank statement, CSV, or Excel file</div>
-      <div class="drop-sub">Optional but recommended · Supports .csv, .xlsx, .pdf · Export from any bank or accounting tool</div>
-    </div>
-    <input type="file" id="file-in" accept=".csv,.xlsx,.pdf,.txt" style="display:none" onchange="onFile(this)" />
-    <div class="file-ok" id="file-ok">✓ <span id="file-name-label"></span> ready</div>
 
     <span class="biz-label">Tell APEX about your business</span>
     <div class="biz-grid">
       <input type="text" id="biz-name" placeholder="Business name" />
       <select id="biz-industry">
         <option value="">Industry</option>
+        <option>Banking / Finance</option>
         <option>Retail</option>
         <option>SaaS / Tech</option>
         <option>Restaurant / Food</option>
@@ -308,6 +305,8 @@
         <option>Other</option>
       </select>
       <input type="text" id="biz-revenue" placeholder="Monthly revenue ($)" />
+      <input type="text" id="biz-expenses" placeholder="Monthly expenses ($)" />
+      <input type="text" id="biz-employees" placeholder="Number of employees" />
       <input type="text" id="biz-age" placeholder="Years in business" />
     </div>
 
@@ -344,7 +343,7 @@
       ⚠ You're browsing as a guest — this report won't be saved. <a onclick="openAuth('signup')" style="color: #fcd34d; text-decoration: underline; cursor:pointer;">Sign up</a> to keep your scan history.
     </div>
 
-    <!-- FREE: Score always visible -->
+    <!-- FREE: Score + top cost-cut headline always visible -->
     <div class="score-card">
       <div class="score-ring-wrap">
         <canvas id="score-canvas" width="96" height="96"></canvas>
@@ -360,19 +359,48 @@
       </div>
     </div>
 
-    <!-- LOCKED: Metrics -->
+    <!-- FREE: top "what to cut" headline, always visible -->
+    <div class="card" id="r-top-cut" style="background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display:flex; gap:12px; align-items:flex-start;">
+      <div class="insight-ico ico-warn">✂️</div>
+      <div>
+        <div class="insight-body ib-title">Biggest opportunity: <span id="r-top-cut-title">—</span></div>
+        <div class="insight-body ib-desc" id="r-top-cut-desc">—</div>
+      </div>
+    </div>
+
+    <!-- LOCKED: Metrics + employee pay + full cost plan -->
     <div class="locked-section">
       <div class="metrics-grid" id="r-metrics"></div>
+
+      <div class="dive-card" id="r-paycard">
+        <div class="dive-body">
+          <div class="section-title">Employee pay benchmark</div>
+          <div id="r-pay-rows"></div>
+        </div>
+      </div>
+
+      <div class="dive-card" id="r-cutcard">
+        <div class="dive-body">
+          <div class="section-title">Full cost-cutting plan</div>
+          <div id="r-cut-rows"></div>
+        </div>
+      </div>
+
+      <div class="action-row" style="margin-bottom: 1.25rem;">
+        <button class="btn-outline" onclick="exportPdf()">⬇ Export PDF report</button>
+      </div>
+
       <div class="lock-overlay">
         <div class="paywall-card">
           <div class="pw-icon">🔒</div>
           <h3>Unlock your full report</h3>
-          <p>Your score is just the beginning. See exactly what's hurting your business and how to fix it.</p>
+          <p>Your score and top opportunity are free. Pro shows you everything else.</p>
           <div class="pw-features">
             <div class="pw-feature">Key metrics — cash runway, burn rate, margins</div>
-            <div class="pw-feature">3 prioritized insights with action steps</div>
-            <div class="pw-feature">Full deep-dive: cash flow, expenses, risk flags</div>
-            <div class="pw-feature">Unlimited scans every month</div>
+            <div class="pw-feature">Employee pay benchmark vs. your industry</div>
+            <div class="pw-feature">Full prioritized cost-cutting plan, not just the top one</div>
+            <div class="pw-feature">PDF export of your report</div>
+            <div class="pw-feature">Unlimited scans, no waiting</div>
           </div>
           <a class="unlock-btn" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank">Unlock full report — $20/mo</a>
           <div class="pw-note">Cancel anytime · Secure payment via Stripe</div>
@@ -394,8 +422,23 @@
   let scanCount = 0;
   let isGuest = false;
   let guestScanCount = 0;
+  let previewPro = false;
+  let lastScanLimitHitAt = null;
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
+  const WAIT_HOURS = 120;
+
+  // Effective Pro status: real Pro OR dev preview toggle (preview never touches billing/DB)
+  function effectiveIsPro() {
+    return isPro || previewPro;
+  }
+
+  function togglePreviewPro() {
+    previewPro = !previewPro;
+    document.getElementById('preview-pro-btn').textContent = previewPro ? 'On' : 'Off';
+    openAccount();
+    if (scanData) renderResults(scanData);
+  }
 
   async function checkSession() {
     const { data: { session } } = await sb.auth.getSession();
@@ -408,9 +451,10 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const { data } = await sb.from('profiles').select('is_pro, scan_count').eq('id', currentUser.id).single();
+    const { data } = await sb.from('profiles').select('is_pro, scan_count, scan_limit_hit_at').eq('id', currentUser.id).single();
     isPro = data?.is_pro || false;
     scanCount = data?.scan_count || 0;
+    lastScanLimitHitAt = data?.scan_limit_hit_at || null;
   }
 
   function renderAuthState() {
@@ -418,7 +462,7 @@
     if (currentUser) {
       navAuth.innerHTML = `
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
-        ${isPro ? '<span class="pro-pill">PRO</span>' : ''}
+        ${effectiveIsPro() ? '<span class="pro-pill">' + (isPro ? 'PRO' : 'PRO PREVIEW') + '</span>' : ''}
       `;
     } else if (isGuest) {
       navAuth.innerHTML = `
@@ -505,11 +549,33 @@
   function openAccount() {
     document.getElementById('am-email').textContent = currentUser.email;
     const scansLeft = Math.max(FREE_SCAN_LIMIT - scanCount, 0);
-    document.getElementById('am-status').textContent = isPro
-      ? '✓ APEX Pro — unlimited scans'
-      : `Free plan — ${scansLeft} scan${scansLeft === 1 ? '' : 's'} left`;
+    let statusText;
+    if (effectiveIsPro()) {
+      statusText = isPro ? '✓ APEX Pro — unlimited scans' : '✓ Pro preview active (dev only, not billed)';
+    } else if (scansLeft > 0) {
+      statusText = `Free plan — ${scansLeft} scan${scansLeft === 1 ? '' : 's'} left`;
+    } else {
+      const remaining = waitTimeRemaining();
+      statusText = remaining
+        ? `Free plan — out of scans, ${remaining} until your next one`
+        : `Free plan — ${scansLeft} scans left`;
+    }
+    document.getElementById('am-status').textContent = statusText;
     document.getElementById('am-upgrade-btn').style.display = isPro ? 'none' : 'block';
+    document.getElementById('preview-pro-btn').textContent = previewPro ? 'On' : 'Off';
     document.getElementById('account-overlay').classList.add('active');
+  }
+
+  // Returns a human string like "118h" if still waiting, or null if the wait is over / not applicable
+  function waitTimeRemaining() {
+    if (!lastScanLimitHitAt) return null;
+    const hitAt = new Date(lastScanLimitHitAt).getTime();
+    const elapsedHours = (Date.now() - hitAt) / (1000 * 60 * 60);
+    const remainingHours = WAIT_HOURS - elapsedHours;
+    if (remainingHours <= 0) return null;
+    const h = Math.floor(remainingHours);
+    const m = Math.floor((remainingHours - h) * 60);
+    return `${h}h ${m}m`;
   }
 
   function closeAccount() {
@@ -521,6 +587,8 @@
     currentUser = null;
     isPro = false;
     scanCount = 0;
+    lastScanLimitHitAt = null;
+    previewPro = false;
     renderAuthState();
     closeAccount();
   }
@@ -588,28 +656,12 @@
 
   checkSession();
 
-  let source = '', fileContent = '', scanData = null;
+  let source = '', scanData = null;
 
   function show(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     window.scrollTo(0, 0);
-  }
-
-  function pickSource(el, src) {
-    document.querySelectorAll('.source-card').forEach(c => c.classList.remove('sel'));
-    el.classList.add('sel');
-    source = src;
-  }
-
-  function onFile(inp) {
-    const f = inp.files[0]; if (!f) return;
-    source = 'Uploaded: ' + f.name;
-    document.getElementById('file-name-label').textContent = f.name;
-    document.getElementById('file-ok').style.display = 'block';
-    const reader = new FileReader();
-    reader.onload = e => { fileContent = e.target.result.slice(0, 4000); };
-    reader.readAsText(f);
   }
 
   async function runScan() {
@@ -623,12 +675,20 @@
       return;
     }
 
-    // Scan gating: free logged-in users get FREE_SCAN_LIMIT total scans
-    if (currentUser && !isPro && scanCount >= FREE_SCAN_LIMIT) {
+    // Scan gating: free logged-in users get FREE_SCAN_LIMIT scans, then a wait window (unless Pro/preview)
+    if (currentUser && !effectiveIsPro() && scanCount >= FREE_SCAN_LIMIT) {
+      const remaining = waitTimeRemaining();
       const err = document.getElementById('err-box');
-      err.innerHTML = `⚠ You've used all ${FREE_SCAN_LIMIT} free scans. <a href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" style="color: var(--accent); text-decoration: underline;">Upgrade to Pro</a> for unlimited scans.`;
-      err.style.display = 'block';
-      return;
+      if (remaining) {
+        err.innerHTML = `⚠ You're out of free scans. Wait ${remaining}, or <a href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" style="color: var(--accent); text-decoration: underline;">upgrade to Pro</a> for unlimited scans now.`;
+        err.style.display = 'block';
+        return;
+      } else {
+        // Wait window has passed — reset and let them scan again
+        scanCount = 0;
+        lastScanLimitHitAt = null;
+        await sb.from('profiles').update({ scan_count: 0, scan_limit_hit_at: null }).eq('id', currentUser.id);
+      }
     }
 
     // Scan gating: guests get GUEST_SCAN_LIMIT scan(s), unsaved
@@ -642,10 +702,12 @@
     const bizName = document.getElementById('biz-name').value.trim();
     const industry = document.getElementById('biz-industry').value;
     const revenue = document.getElementById('biz-revenue').value.trim();
+    const expenses = document.getElementById('biz-expenses').value.trim();
+    const employees = document.getElementById('biz-employees').value.trim();
     const age = document.getElementById('biz-age').value.trim();
 
     // Reset borders
-    ['biz-name','biz-industry','biz-revenue','biz-age'].forEach(id => {
+    ['biz-name','biz-industry','biz-revenue','biz-expenses','biz-employees','biz-age'].forEach(id => {
       document.getElementById(id).style.borderColor = '';
     });
 
@@ -653,6 +715,8 @@
     if (!bizName) { missing.push('biz-name'); }
     if (!industry) { missing.push('biz-industry'); }
     if (!revenue) { missing.push('biz-revenue'); }
+    if (!expenses) { missing.push('biz-expenses'); }
+    if (!employees) { missing.push('biz-employees'); }
     if (!age) { missing.push('biz-age'); }
 
     if (missing.length > 0) {
@@ -660,7 +724,7 @@
         document.getElementById(id).style.borderColor = '#ef4444';
       });
       const err = document.getElementById('err-box');
-      err.textContent = '⚠ Please fill in all fields before running the scan — business name, industry, monthly revenue, and years in business are all required.';
+      err.textContent = '⚠ Please fill in all fields before running the scan — business name, industry, monthly revenue, monthly expenses, number of employees, and years in business are all required.';
       err.style.display = 'block';
       return;
     }
@@ -678,9 +742,10 @@
           bizName,
           industry,
           revenue,
+          expenses,
+          employees,
           age,
-          source: source || 'manual entry',
-          fileContent
+          source: source || 'manual entry'
         })
       });
 
@@ -714,9 +779,15 @@
         full_data: data
       });
 
+      // Only real Pro skips the counter — preview-Pro is a dev view only, doesn't change billing state
       if (!isPro) {
         scanCount += 1;
-        await sb.from('profiles').update({ scan_count: scanCount }).eq('id', currentUser.id);
+        const updates = { scan_count: scanCount };
+        if (scanCount >= FREE_SCAN_LIMIT) {
+          lastScanLimitHitAt = new Date().toISOString();
+          updates.scan_limit_hit_at = lastScanLimitHitAt;
+        }
+        await sb.from('profiles').update(updates).eq('id', currentUser.id);
       }
     } catch (e) {
       // Non-fatal: scan results already shown to user even if save fails
@@ -736,9 +807,14 @@
       guestNotice.style.display = (isGuest && !currentUser) ? 'block' : 'none';
     }
 
+    // FREE: top cost-cutting headline (first item of the cut plan, always shown)
+    const topCut = (d.costCuts && d.costCuts[0]) || null;
+    document.getElementById('r-top-cut-title').textContent = topCut ? topCut.title : 'No major cuts found';
+    document.getElementById('r-top-cut-desc').textContent = topCut ? topCut.desc : 'Your spending looks reasonable for your revenue.';
+
     const metricsEl = document.getElementById('r-metrics');
     if (metricsEl) {
-      metricsEl.innerHTML = d.metrics.map(m => `
+      metricsEl.innerHTML = (d.metrics || []).map(m => `
         <div class="metric">
           <div class="metric-label">${m.label}</div>
           <div class="metric-val">${m.value}</div>
@@ -746,13 +822,39 @@
         </div>`).join('');
     }
 
-    // Show lock overlay only for non-Pro users
+    // PRO: employee pay benchmark
+    const payRows = document.getElementById('r-pay-rows');
+    if (payRows) {
+      payRows.innerHTML = (d.payBenchmark || []).map(r => `
+        <div class="dive-row">
+          <span class="dr-label">${r.role}</span>
+          <span class="dr-val ${r.color || ''}">${r.value}</span>
+        </div>`).join('') || '<div class="dive-row"><span class="dr-label">No role data available</span></div>';
+    }
+
+    // PRO: full cost-cutting plan (all items, including the free top one)
+    const cutRows = document.getElementById('r-cut-rows');
+    if (cutRows) {
+      cutRows.innerHTML = (d.costCuts || []).map(c => `
+        <div class="dive-row">
+          <span class="dr-label">${c.title}</span>
+          <span class="dr-val ${c.color || ''}">${c.desc}</span>
+        </div>`).join('') || '<div class="dive-row"><span class="dr-label">No cuts recommended</span></div>';
+    }
+
+    // Show lock overlay only for non-Pro users (real Pro or dev preview unlocks it)
     const lockOverlay = document.querySelector('.lock-overlay');
     if (lockOverlay) {
-      lockOverlay.style.display = isPro ? 'none' : 'flex';
+      lockOverlay.style.display = effectiveIsPro() ? 'none' : 'flex';
     }
 
     show('s-results');
+  }
+
+  // ── PDF EXPORT (Pro only) ──
+  function exportPdf() {
+    if (!effectiveIsPro()) return;
+    window.print();
   }
 
   function drawRing(score) {
@@ -782,10 +884,7 @@
   }
 
   function goBack() {
-    source = ''; fileContent = ''; scanData = null;
-    document.getElementById('file-in').value = '';
-    document.getElementById('file-ok').style.display = 'none';
-    document.querySelectorAll('.source-card').forEach(c => c.classList.remove('sel'));
+    source = ''; scanData = null;
     document.querySelectorAll('.step-list li').forEach(li => li.classList.remove('done'));
     show('s-connect');
   }
