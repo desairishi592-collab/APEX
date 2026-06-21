@@ -717,7 +717,13 @@
         }
       }
     } catch (e) {
-      errEl.textContent = e.message;
+      let msg = 'Something went wrong. Please try again.';
+      if (e && typeof e.message === 'string' && e.message.trim()) {
+        msg = e.message;
+      } else if (typeof e === 'string' && e.trim()) {
+        msg = e;
+      }
+      errEl.textContent = msg;
       errEl.style.display = 'block';
     }
   }
