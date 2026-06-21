@@ -689,6 +689,14 @@
       await loadProfile();
       renderAuthState();
       closeAuth();
+
+      // If they came from the landing page having picked Pro, take them straight to checkout
+      if (pendingProUpgrade && authMode === 'signup') {
+        pendingProUpgrade = false;
+        if (!isPro) {
+          window.open('https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00', '_blank');
+        }
+      }
     } catch (e) {
       errEl.textContent = e.message;
       errEl.style.display = 'block';
@@ -858,8 +866,31 @@
     }
   }
 
+  // ── LANDING PAGE HANDOFF ──
+  // Reads ?mode=owner|investor and ?plan=pro from the URL (set by landing.html) so the
+  // right mode is pre-selected and, if they chose Pro, they're nudged to upgrade right
+  // after signing up instead of having to find the button themselves later.
+  let pendingProUpgrade = false;
+
+  function applyLandingParams() {
+    const params = new URLSearchParams(window.location.search);
+    const urlMode = params.get('mode');
+    const urlPlan = params.get('plan');
+
+    if (urlMode === 'investor') {
+      setMode('investor');
+    } else {
+      setMode('owner');
+    }
+
+    if (urlPlan === 'pro') {
+      pendingProUpgrade = true;
+      openAuth('signup');
+    }
+  }
+
   checkSession();
-  setMode('owner');
+  applyLandingParams();
 
   let source = '', scanData = null, currentScanBizName = '';
 
