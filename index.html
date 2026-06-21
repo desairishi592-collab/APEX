@@ -683,7 +683,26 @@
       } else {
         result = await sb.auth.signInWithPassword({ email, password });
       }
-      if (result.error) throw result.error;
+
+      // Supabase can rate-limit the confirmation EMAIL while still creating the account itself.
+      // If that happens, the account may exist even though we got an error back — so instead of
+      // just showing a raw error, try logging in with the same credentials before giving up.
+      if (result.error) {
+        const isRateLimit = /rate limit/i.test(result.error.message || '');
+        if (isRateLimit && authMode === 'signup') {
+          const retryLogin = await sb.auth.signInWithPassword({ email, password });
+          if (!retryLogin.error) {
+            result = retryLogin;
+          } else {
+            errEl.textContent = "We're sending a lot of signup emails right now — please wait a minute and try again.";
+            errEl.style.display = 'block';
+            return;
+          }
+        } else {
+          throw result.error;
+        }
+      }
+
       currentUser = result.data.user;
       isGuest = false;
       await loadProfile();
