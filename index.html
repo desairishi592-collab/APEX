@@ -223,7 +223,7 @@
 <!-- AUTH MODAL -->
 <div class="auth-overlay" id="auth-overlay">
   <div class="auth-modal">
-    <button class="auth-close" onclick="closeAuth()">✕</button>
+    <button class="auth-close" onclick="pendingScanAfterAuth = false; closeAuth();">✕</button>
     <h2 id="auth-title">Log in to APEX</h2>
     <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
     <div class="auth-field">
@@ -493,6 +493,7 @@
   let previewPro = false;
   let lastScanLimitHitAt = null;
   let scanMode = 'owner'; // 'owner' | 'investor'
+  let pendingScanAfterAuth = false;
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
@@ -714,6 +715,17 @@
         pendingProUpgrade = false;
         if (!isPro) {
           window.open('https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00', '_blank');
+        }
+      }
+
+      // If they tried to scan before they were logged in, finish that scan for them now
+      // instead of making them click "Run scan" a second time.
+      if (pendingScanAfterAuth) {
+        pendingScanAfterAuth = false;
+        if (document.getElementById('form-public').style.display === 'block') {
+          runStockScan();
+        } else {
+          runScan();
         }
       }
     } catch (e) {
@@ -946,6 +958,7 @@
     if (!currentUser && !isGuest) {
       errEl.textContent = '⚠ Please log in, sign up, or continue as a guest to run a health scan.';
       errEl.style.display = 'block';
+      pendingScanAfterAuth = true;
       openAuth('signup');
       return false;
     }
