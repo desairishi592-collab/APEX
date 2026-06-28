@@ -284,25 +284,30 @@ async function handleStockAnalysis(ticker, companyName) {
   const exchange = profile.exchange || 'Unknown';
   const ipo = profile.ipo || 'Unknown';
 
-  // Price: use current price if market open, previous close if after hours/weekend
-  const rawPrice = quote?.c && quote.c > 0 ? quote.c : quote?.pc && quote.pc > 0 ? quote.pc : null;
+  // Price: try live price, then previous close, then estimate from market cap/shares
+  const livePrice = quote?.c && quote.c > 0 ? quote.c : null;
+  const prevClose = quote?.pc && quote.pc > 0 ? quote.pc : null;
+  const priceFromCap = (profile.marketCapitalization && profile.shareOutstanding && profile.shareOutstanding > 0)
+    ? (profile.marketCapitalization / profile.shareOutstanding)
+    : null;
+  const rawPrice = livePrice || prevClose || priceFromCap;
   const currentPrice = rawPrice ? `$${rawPrice.toFixed(2)}` : 'Unknown';
-  const priceNote = quote?.c && quote.c > 0 ? 'live' : 'previous close';
+  const priceNote = livePrice ? 'live' : prevClose ? 'previous close' : priceFromCap ? 'estimated from market cap' : 'unavailable';
   const priceChange = quote?.dp ? `${quote.dp.toFixed(2)}%` : 'Unknown';
 
   // Key financial metrics from Finnhub — using correct field names
   const m = metrics?.metric || {};
   const peRatio = m['peNormalizedAnnual'] ? m['peNormalizedAnnual'].toFixed(1) : 'Unknown';
   const eps = m['epsNormalizedAnnual'] ? `$${m['epsNormalizedAnnual'].toFixed(2)}` : 'Unknown';
-  // Finnhub revenue growth uses different key names depending on data availability
   const revenueGrowthRaw = m['revenueGrowth3Y'] || m['revenueGrowthQuarterlyYoy'] || m['revenueGrowth5Y'] || null;
   const revenueGrowth = revenueGrowthRaw ? `${(revenueGrowthRaw * 100).toFixed(1)}%` : 'Unknown';
   const profitMargin = m['netProfitMarginAnnual'] ? `${m['netProfitMarginAnnual'].toFixed(1)}%` : 'Unknown';
   const debtEquity = m['totalDebt/totalEquityAnnual'] ? m['totalDebt/totalEquityAnnual'].toFixed(2) : 'Unknown';
-  const roe = m['roeAnnual'] ? `${m['roeAnnual'].toFixed(1)}%` : 'Unknown';
+  // ROE: Finnhub uses 'roeTTM' as the primary field name
+  const roeRaw = m['roeTTM'] || m['roeAnnual'] || m['roeRateAnnual'] || null;
+  const roe = roeRaw ? `${roeRaw.toFixed(1)}%` : 'Unknown';
   const currentRatio = m['currentRatioAnnual'] ? m['currentRatioAnnual'].toFixed(2) : 'Unknown';
   const beta = m['beta'] ? m['beta'].toFixed(2) : 'Unknown';
-  // 52-week range from Finnhub metrics
   const high52 = m['52WeekHigh'] ? `$${m['52WeekHigh'].toFixed(2)}` : 'Unknown';
   const low52 = m['52WeekLow'] ? `$${m['52WeekLow'].toFixed(2)}` : 'Unknown';
 
