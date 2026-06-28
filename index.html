@@ -1139,9 +1139,13 @@
     document.getElementById('r-top-cut-ico').textContent = scanMode === 'investor' ? '🚩' : '✂️';
     document.getElementById('r-pay-title').textContent = c.payTitle;
     document.getElementById('r-cut-title').textContent = c.cutTitle;
-    document.getElementById('pw-title').textContent = c.pwTitle;
-    document.getElementById('pw-sub').textContent = c.pwSub;
-    document.getElementById('pw-features').innerHTML = c.pwFeatures.map(f => `<div class="pw-feature">${f}</div>`).join('');
+    // pw-title/pw-sub/pw-features removed during beta — paywall replaced with Coming Soon card
+    const pwTitle = document.getElementById('pw-title');
+    const pwSub = document.getElementById('pw-sub');
+    const pwFeatures = document.getElementById('pw-features');
+    if (pwTitle) pwTitle.textContent = c.pwTitle;
+    if (pwSub) pwSub.textContent = c.pwSub;
+    if (pwFeatures) pwFeatures.innerHTML = c.pwFeatures.map(f => `<div class="pw-feature">${f}</div>`).join('');
 
     document.getElementById('r-score').textContent = d.score;
     document.getElementById('r-status').textContent = (scanMode === 'investor' ? 'Safety: ' : 'Health: ') + d.status;
