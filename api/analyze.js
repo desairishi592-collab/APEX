@@ -299,24 +299,9 @@ async function handleStockAnalysis(ticker, companyName) {
   const m = metrics?.metric || {};
   const peRatio = m['peNormalizedAnnual'] ? m['peNormalizedAnnual'].toFixed(1) : 'Unknown';
   const eps = m['epsNormalizedAnnual'] ? `$${m['epsNormalizedAnnual'].toFixed(2)}` : 'Unknown';
-  const revenueGrowthRaw = m['revenueGrowth3Y'] || m['revenueGrowthQuarterlyYoy'] || m['revenueGrowth5Y'] || null;
-
-  // Calculate real YoY revenue growth from the annual series data if available
-  // This is more accurate than Finnhub's pre-calculated growth fields which can be cumulative
-  let revenueGrowth = 'Unknown';
-  const annualRevenue = metrics?.series?.annual?.revenue;
-  if (annualRevenue && annualRevenue.length >= 2) {
-    const sorted = [...annualRevenue].sort((a, b) => new Date(b.period) - new Date(a.period));
-    const latest = sorted[0]?.v;
-    const prior = sorted[1]?.v;
-    if (latest && prior && prior !== 0) {
-      const yoyGrowth = ((latest - prior) / Math.abs(prior)) * 100;
-      revenueGrowth = `${yoyGrowth.toFixed(1)}%`;
-    }
-  } else if (revenueGrowthRaw !== null && Math.abs(revenueGrowthRaw) < 2) {
-    // Only use pre-calculated field if it looks like a reasonable annual rate (not cumulative)
-    revenueGrowth = `${(revenueGrowthRaw * 100).toFixed(1)}%`;
-  }
+  // Revenue growth from Finnhub free tier is unreliable — use EPS and price return instead
+  const revenueGrowth = 'N/A (see EPS trend below)';
+  const yearReturn = m['52WeekPriceReturnDaily'] ? `${m['52WeekPriceReturnDaily'].toFixed(1)}%` : 'Unknown';
   const profitMargin = m['netProfitMarginAnnual'] ? `${m['netProfitMarginAnnual'].toFixed(1)}%` : 'Unknown';
   const debtEquity = m['totalDebt/totalEquityAnnual'] ? m['totalDebt/totalEquityAnnual'].toFixed(2) : 'Unknown';
   // ROE: Finnhub uses 'roeTTM' as the primary field name
@@ -342,11 +327,11 @@ Stock Price: ${currentPrice} (${priceNote})
 Price Change: ${priceChange}
 52-Week High: ${high52}
 52-Week Low: ${low52}
+52-Week Price Return: ${yearReturn}
 
 Key Financial Metrics (annual):
-- P/E Ratio: ${peRatio} (note: compare against ${industry} sector norms, not the broad market average — tech/growth companies typically trade at higher P/E than the S&P 500 average)
-- EPS: ${eps}
-- Revenue Growth: ${revenueGrowth}
+- P/E Ratio: ${peRatio} (note: compare against ${industry} sector norms, not the broad market average)
+- EPS (Earnings Per Share): ${eps}
 - Net Profit Margin: ${profitMargin}
 - Debt/Equity Ratio: ${debtEquity}
 - Return on Equity (ROE): ${roe}
@@ -374,10 +359,10 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
   "summary": <1-2 sentence balanced plain-English summary grounded in the actual numbers, mentioning specific figures and comparing to sector norms>,
   "badge": <short 2-4 word badge reflecting the most important characteristic, e.g. "Strong margins" or "Sector leader">,
   "metrics": [
-    { "label": "Current Price", "value": "${currentPrice}", "type": "up"|"down"|"warn", "trend": "<note on price vs 52-week range>" },
+    { "label": "Current Price", "value": "${currentPrice}", "type": "up"|"down"|"warn", "trend": "<note on price vs 52-week range of ${low52}–${high52}>" },
     { "label": "P/E Ratio", "value": "${peRatio}", "type": "up"|"down"|"warn", "trend": "<is this reasonable for the ${industry} sector specifically?>" },
     { "label": "Profit Margin", "value": "${profitMargin}", "type": "up"|"down"|"warn", "trend": "<is this strong or weak for ${industry}?>" },
-    { "label": "Revenue Growth", "value": "${revenueGrowth}", "type": "up"|"down"|"warn", "trend": "<is growth healthy for a company of this size and maturity?>" }
+    { "label": "52-Week Return", "value": "${yearReturn}", "type": "up"|"down"|"warn", "trend": "<how has the stock performed vs the broader market over the past year?>" }
   ],
   "industryComparison": [
     { "label": "Debt/Equity vs. ${industry} peers", "value": "<${debtEquity} — contextualise this vs typical ${industry} companies>", "color": "grn"|"amb"|"red" },
