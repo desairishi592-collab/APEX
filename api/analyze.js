@@ -224,48 +224,145 @@ async function callGroqForJson(prompt) {
 }
 
 // ── PUBLIC STOCK ANALYSIS ──
-// Different from the private-business path: no revenue/expenses/employees are typed in by the
-// user, since a public company's financials are (in theory) already public. The AI works from
-// its own training knowledge of the company rather than user-provided numbers.
+// Pulls real financials from Finnhub first, then feeds them into the AI prompt.
+// This means the analysis is grounded in actual current data, not AI memory.
 async function handleStockAnalysis(ticker, companyName) {
-  const displayName = companyName ? `${companyName} (${ticker.toUpperCase()})` : ticker.toUpperCase();
+  const finnhubKey = process.env.FINNHUB_API_KEY;
+  const symbol = ticker.toUpperCase();
 
-  const prompt = `You are a financial due-diligence analyst helping a prospective investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares — they are an outside investor, not company management. Be direct about red flags; don't soften risk for the sake of politeness.
+  if (!finnhubKey) {
+    return new Response(JSON.stringify({ error: 'Server misconfiguration: FINNHUB_API_KEY is not set' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
 
-You do NOT have access to live market data. Base your analysis on your general knowledge of this company from training data, and be clear that figures may be approximate or outdated. Do not invent precise real-time figures (like today's stock price) — if you don't know a number with confidence, describe it qualitatively instead (e.g. "historically strong margins" rather than a fabricated precise percentage).
+  // Fetch real data from Finnhub in parallel — quote, company profile, and financials
+  let quote = null, profile = null, financials = null, metrics = null;
 
-Company to analyze: ${displayName}
+  try {
+    const [quoteRes, profileRes, financialsRes, metricsRes] = await Promise.all([
+      fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`),
+      fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${finnhubKey}`),
+      fetch(`https://finnhub.io/api/v1/financials/reported?symbol=${symbol}&freq=annual&token=${finnhubKey}`),
+      fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${finnhubKey}`)
+    ]);
+
+    [quote, profile, financials, metrics] = await Promise.all([
+      quoteRes.ok ? quoteRes.json() : null,
+      profileRes.ok ? profileRes.json() : null,
+      financialsRes.ok ? financialsRes.json() : null,
+      metricsRes.ok ? metricsRes.json() : null
+    ]);
+  } catch (fetchErr) {
+    return new Response(JSON.stringify({ error: 'Could not reach market data provider', detail: fetchErr.message }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  // If Finnhub doesn't recognize the ticker, company won't have a name
+  if (!profile || !profile.name) {
+    return new Response(JSON.stringify({
+      score: 0,
+      status: 'Do Not Invest',
+      summary: `"${symbol}" could not be found as a recognized public company ticker. Please check the symbol and try again.`,
+      badge: 'Unknown ticker',
+      metrics: [],
+      industryComparison: [],
+      costCuts: [{ title: 'Ticker not recognized', desc: 'Verify the ticker symbol is correct and listed on a major exchange.', color: 'red' }],
+      isPublicStock: true
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Format real data into readable context for the AI
+  const companyDisplay = profile.name || companyName || symbol;
+  const industry = profile.finnhubIndustry || profile.gsector || 'Unknown';
+  const country = profile.country || 'US';
+  const marketCap = profile.marketCapitalization ? `$${(profile.marketCapitalization / 1000).toFixed(1)}B` : 'Unknown';
+  const employees = profile.employeeTotal ? profile.employeeTotal.toLocaleString() : 'Unknown';
+  const exchange = profile.exchange || 'Unknown';
+  const ipo = profile.ipo || 'Unknown';
+  const currentPrice = quote?.c ? `$${quote.c.toFixed(2)}` : 'Unknown';
+  const priceChange = quote?.dp ? `${quote.dp.toFixed(2)}%` : 'Unknown';
+  const high52 = quote?.h ? `$${quote.h.toFixed(2)}` : 'Unknown';
+  const low52 = quote?.l ? `$${quote.l.toFixed(2)}` : 'Unknown';
+
+  // Key financial metrics from Finnhub
+  const m = metrics?.metric || {};
+  const peRatio = m['peNormalizedAnnual'] ? m['peNormalizedAnnual'].toFixed(1) : 'Unknown';
+  const eps = m['epsNormalizedAnnual'] ? `$${m['epsNormalizedAnnual'].toFixed(2)}` : 'Unknown';
+  const revenueGrowth = m['revenueGrowthAnnual'] ? `${(m['revenueGrowthAnnual'] * 100).toFixed(1)}%` : 'Unknown';
+  const profitMargin = m['netProfitMarginAnnual'] ? `${(m['netProfitMarginAnnual']).toFixed(1)}%` : 'Unknown';
+  const debtEquity = m['totalDebt/totalEquityAnnual'] ? m['totalDebt/totalEquityAnnual'].toFixed(2) : 'Unknown';
+  const roe = m['roeAnnual'] ? `${m['roeAnnual'].toFixed(1)}%` : 'Unknown';
+  const currentRatio = m['currentRatioAnnual'] ? m['currentRatioAnnual'].toFixed(2) : 'Unknown';
+  const beta = m['beta'] ? m['beta'].toFixed(2) : 'Unknown';
+
+  const dataBlock = `
+LIVE MARKET DATA (as of today, pulled from Finnhub):
+Company: ${companyDisplay}
+Ticker: ${symbol}
+Exchange: ${exchange}
+Industry: ${industry}
+Country: ${country}
+Market Cap: ${marketCap}
+Employees: ${employees}
+IPO Date: ${ipo}
+
+Current Stock Price: ${currentPrice}
+Price Change Today: ${priceChange}
+52-Week High: ${high52}
+52-Week Low: ${low52}
+
+Key Financial Metrics (annual):
+- P/E Ratio: ${peRatio}
+- EPS: ${eps}
+- Revenue Growth (YoY): ${revenueGrowth}
+- Net Profit Margin: ${profitMargin}
+- Debt/Equity Ratio: ${debtEquity}
+- Return on Equity (ROE): ${roe}
+- Current Ratio: ${currentRatio}
+- Beta (volatility vs market): ${beta}
+`.trim();
+
+  const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares — they are an outside investor. Be direct about risks; don't soften them for politeness.
+
+You have been given REAL, LIVE market data pulled directly from a financial data provider right now. Base your entire analysis on these real numbers — do not rely on your training data or memory for this company's financials. If a field says "Unknown", acknowledge it rather than inventing a number.
+
+${dataBlock}
 
 Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTLY this shape:
 
 {
-  "score": <integer 0-100, overall investment safety score based on what you know of this company's fundamentals, stability, and risk — higher means safer to invest>,
+  "score": <integer 0-100, overall investment safety score based on the real data above — higher means safer to invest>,
   "status": <"Safe" | "Moderate Risk" | "High Risk" | "Do Not Invest">,
-  "summary": <1-2 sentence plain-English summary of whether this looks like a safe investment and why, based on known fundamentals>,
-  "badge": <short 2-4 word badge, e.g. "Cash flow risk" or "Solid fundamentals">,
+  "summary": <1-2 sentence plain-English summary grounded in the actual numbers above — mention specific figures>,
+  "badge": <short 2-4 word badge, e.g. "Strong margins" or "High debt risk">,
   "metrics": [
-    { "label": "Business Stability", "value": "<qualitative assessment, e.g. 'Established, low volatility'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
-    { "label": "Growth Trend", "value": "<qualitative assessment>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
-    { "label": "Competitive Position", "value": "<qualitative assessment>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
-    { "label": "Known Risk Factors", "value": "<qualitative assessment>", "type": "up"|"down"|"warn", "trend": "<short trend note>" }
+    { "label": "Current Price", "value": "${currentPrice}", "type": "up"|"down"|"warn", "trend": "<short note on today's movement and 52-week range>" },
+    { "label": "P/E Ratio", "value": "${peRatio}", "type": "up"|"down"|"warn", "trend": "<is this cheap or expensive vs typical for this industry?>" },
+    { "label": "Profit Margin", "value": "${profitMargin}", "type": "up"|"down"|"warn", "trend": "<is this strong or weak for the industry?>" },
+    { "label": "Revenue Growth", "value": "${revenueGrowth}", "type": "up"|"down"|"warn", "trend": "<is the business growing, flat, or shrinking?>" }
   ],
   "industryComparison": [
-    { "label": "<a comparison point vs. industry peers>", "value": "<qualitative comparison>", "color": "grn"|"amb"|"red" },
-    { "label": "<another comparison point>", "value": "<qualitative comparison>", "color": "grn"|"amb"|"red" },
-    { "label": "<another comparison point>", "value": "<qualitative comparison>", "color": "grn"|"amb"|"red" }
+    { "label": "Debt/Equity vs. ${industry} peers", "value": "<${debtEquity} — is this high or low for this industry?>", "color": "grn"|"amb"|"red" },
+    { "label": "ROE vs. ${industry} peers", "value": "<${roe} — strong or weak return on equity for this sector?>", "color": "grn"|"amb"|"red" },
+    { "label": "Beta vs. market", "value": "<${beta} — how volatile is this vs. the broader market?>", "color": "grn"|"amb"|"red" }
   ],
   "costCuts": [
-    { "title": "<short headline of the #1 biggest red flag or risk an investor should know about this company>", "desc": "<1 sentence explaining the risk and what to research further before investing>", "color": "red"|"amb"|"grn" },
-    { "title": "<2nd biggest risk>", "desc": "<explanation + what to verify>", "color": "red"|"amb"|"grn" },
-    { "title": "<3rd biggest risk>", "desc": "<explanation + what to verify>", "color": "red"|"amb"|"grn" }
+    { "title": "<#1 most important risk or red flag in the real data above>", "desc": "<1 sentence explaining what this means for an investor and what to watch>", "color": "red"|"amb"|"grn" },
+    { "title": "<2nd risk>", "desc": "<explanation>", "color": "red"|"amb"|"grn" },
+    { "title": "<3rd risk>", "desc": "<explanation>", "color": "red"|"amb"|"grn" }
   ],
-  "isPublicStock": true
+  "isPublicStock": true,
+  "dataSource": "Live data via Finnhub"
 }
 
 Rules:
-- "costCuts" MUST be ordered with the single biggest/most concerning risk first — that first item is shown to free users as the headline.
-- If this is not a real, recognizable public company, set "score" to 0, "status" to "Do Not Invest", and explain in "summary" that the company/ticker could not be identified.
-- Return ONLY the JSON object. No explanation, no markdown code fences.`;
+- Every value in "metrics" and "industryComparison" MUST reference the actual numbers provided above, not invented ones.
+- "costCuts" should reflect genuine risks visible in the real data, ordered most severe first.
+- Return ONLY the JSON object.`;
 
   return await callGroqForJson(prompt);
 }
