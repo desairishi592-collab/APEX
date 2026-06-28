@@ -1,4 +1,4 @@
-export const config = { runtime: 'edge' };
+export const config = { runtime: 'edge' }; // v2
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
