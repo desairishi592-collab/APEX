@@ -1,4 +1,4 @@
-export const config = { runtime: 'edge' }; // v2
+export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
@@ -283,42 +283,49 @@ async function handleStockAnalysis(ticker, companyName) {
   const employees = profile.employeeTotal ? profile.employeeTotal.toLocaleString() : 'Unknown';
   const exchange = profile.exchange || 'Unknown';
   const ipo = profile.ipo || 'Unknown';
-  const currentPrice = quote?.c ? `$${quote.c.toFixed(2)}` : 'Unknown';
-  const priceChange = quote?.dp ? `${quote.dp.toFixed(2)}%` : 'Unknown';
-  const high52 = quote?.h ? `$${quote.h.toFixed(2)}` : 'Unknown';
-  const low52 = quote?.l ? `$${quote.l.toFixed(2)}` : 'Unknown';
 
-  // Key financial metrics from Finnhub
+  // Price: use current price if market open, previous close if after hours/weekend
+  const rawPrice = quote?.c && quote.c > 0 ? quote.c : quote?.pc && quote.pc > 0 ? quote.pc : null;
+  const currentPrice = rawPrice ? `$${rawPrice.toFixed(2)}` : 'Unknown';
+  const priceNote = quote?.c && quote.c > 0 ? 'live' : 'previous close';
+  const priceChange = quote?.dp ? `${quote.dp.toFixed(2)}%` : 'Unknown';
+
+  // Key financial metrics from Finnhub — using correct field names
   const m = metrics?.metric || {};
   const peRatio = m['peNormalizedAnnual'] ? m['peNormalizedAnnual'].toFixed(1) : 'Unknown';
   const eps = m['epsNormalizedAnnual'] ? `$${m['epsNormalizedAnnual'].toFixed(2)}` : 'Unknown';
-  const revenueGrowth = m['revenueGrowthAnnual'] ? `${(m['revenueGrowthAnnual'] * 100).toFixed(1)}%` : 'Unknown';
-  const profitMargin = m['netProfitMarginAnnual'] ? `${(m['netProfitMarginAnnual']).toFixed(1)}%` : 'Unknown';
+  // Finnhub revenue growth uses different key names depending on data availability
+  const revenueGrowthRaw = m['revenueGrowth3Y'] || m['revenueGrowthQuarterlyYoy'] || m['revenueGrowth5Y'] || null;
+  const revenueGrowth = revenueGrowthRaw ? `${(revenueGrowthRaw * 100).toFixed(1)}%` : 'Unknown';
+  const profitMargin = m['netProfitMarginAnnual'] ? `${m['netProfitMarginAnnual'].toFixed(1)}%` : 'Unknown';
   const debtEquity = m['totalDebt/totalEquityAnnual'] ? m['totalDebt/totalEquityAnnual'].toFixed(2) : 'Unknown';
   const roe = m['roeAnnual'] ? `${m['roeAnnual'].toFixed(1)}%` : 'Unknown';
   const currentRatio = m['currentRatioAnnual'] ? m['currentRatioAnnual'].toFixed(2) : 'Unknown';
   const beta = m['beta'] ? m['beta'].toFixed(2) : 'Unknown';
+  // 52-week range from Finnhub metrics
+  const high52 = m['52WeekHigh'] ? `$${m['52WeekHigh'].toFixed(2)}` : 'Unknown';
+  const low52 = m['52WeekLow'] ? `$${m['52WeekLow'].toFixed(2)}` : 'Unknown';
 
   const dataBlock = `
-LIVE MARKET DATA (as of today, pulled from Finnhub):
+LIVE MARKET DATA (pulled from Finnhub):
 Company: ${companyDisplay}
 Ticker: ${symbol}
 Exchange: ${exchange}
-Industry: ${industry}
+Industry/Sector: ${industry}
 Country: ${country}
 Market Cap: ${marketCap}
 Employees: ${employees}
 IPO Date: ${ipo}
 
-Current Stock Price: ${currentPrice}
-Price Change Today: ${priceChange}
+Stock Price: ${currentPrice} (${priceNote})
+Price Change: ${priceChange}
 52-Week High: ${high52}
 52-Week Low: ${low52}
 
 Key Financial Metrics (annual):
-- P/E Ratio: ${peRatio}
+- P/E Ratio: ${peRatio} (note: compare against ${industry} sector norms, not the broad market average — tech/growth companies typically trade at higher P/E than the S&P 500 average)
 - EPS: ${eps}
-- Revenue Growth (YoY): ${revenueGrowth}
+- Revenue Growth: ${revenueGrowth}
 - Net Profit Margin: ${profitMargin}
 - Debt/Equity Ratio: ${debtEquity}
 - Return on Equity (ROE): ${roe}
@@ -326,42 +333,48 @@ Key Financial Metrics (annual):
 - Beta (volatility vs market): ${beta}
 `.trim();
 
-  const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares — they are an outside investor. Be direct about risks; don't soften them for politeness.
+  const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares. Be balanced and accurate — neither overly optimistic nor pessimistic.
 
-You have been given REAL, LIVE market data pulled directly from a financial data provider right now. Base your entire analysis on these real numbers — do not rely on your training data or memory for this company's financials. If a field says "Unknown", acknowledge it rather than inventing a number.
+CRITICAL INSTRUCTION: Always evaluate metrics relative to the company's specific INDUSTRY and SECTOR, not against generic market averages. For example:
+- A P/E of 30-40 is normal for large-cap technology companies — do NOT flag this as a red flag for a tech company
+- High debt/equity can be normal in capital-intensive industries
+- Compare profitability, growth, and valuation against SECTOR PEERS, not the S&P 500 average
+- Consider market cap and company maturity — a $1T+ company growing at 5-10% is healthy, not alarming
+
+You have REAL, LIVE market data pulled directly from Finnhub. Base your entire analysis on these real numbers.
 
 ${dataBlock}
 
 Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTLY this shape:
 
 {
-  "score": <integer 0-100, overall investment safety score based on the real data above — higher means safer to invest>,
+  "score": <integer 0-100, overall investment safety score — calibrated to the company's sector and size, higher means safer>,
   "status": <"Safe" | "Moderate Risk" | "High Risk" | "Do Not Invest">,
-  "summary": <1-2 sentence plain-English summary grounded in the actual numbers above — mention specific figures>,
-  "badge": <short 2-4 word badge, e.g. "Strong margins" or "High debt risk">,
+  "summary": <1-2 sentence balanced plain-English summary grounded in the actual numbers, mentioning specific figures and comparing to sector norms>,
+  "badge": <short 2-4 word badge reflecting the most important characteristic, e.g. "Strong margins" or "Sector leader">,
   "metrics": [
-    { "label": "Current Price", "value": "${currentPrice}", "type": "up"|"down"|"warn", "trend": "<short note on today's movement and 52-week range>" },
-    { "label": "P/E Ratio", "value": "${peRatio}", "type": "up"|"down"|"warn", "trend": "<is this cheap or expensive vs typical for this industry?>" },
-    { "label": "Profit Margin", "value": "${profitMargin}", "type": "up"|"down"|"warn", "trend": "<is this strong or weak for the industry?>" },
-    { "label": "Revenue Growth", "value": "${revenueGrowth}", "type": "up"|"down"|"warn", "trend": "<is the business growing, flat, or shrinking?>" }
+    { "label": "Current Price", "value": "${currentPrice}", "type": "up"|"down"|"warn", "trend": "<note on price vs 52-week range>" },
+    { "label": "P/E Ratio", "value": "${peRatio}", "type": "up"|"down"|"warn", "trend": "<is this reasonable for the ${industry} sector specifically?>" },
+    { "label": "Profit Margin", "value": "${profitMargin}", "type": "up"|"down"|"warn", "trend": "<is this strong or weak for ${industry}?>" },
+    { "label": "Revenue Growth", "value": "${revenueGrowth}", "type": "up"|"down"|"warn", "trend": "<is growth healthy for a company of this size and maturity?>" }
   ],
   "industryComparison": [
-    { "label": "Debt/Equity vs. ${industry} peers", "value": "<${debtEquity} — is this high or low for this industry?>", "color": "grn"|"amb"|"red" },
+    { "label": "Debt/Equity vs. ${industry} peers", "value": "<${debtEquity} — contextualise this vs typical ${industry} companies>", "color": "grn"|"amb"|"red" },
     { "label": "ROE vs. ${industry} peers", "value": "<${roe} — strong or weak return on equity for this sector?>", "color": "grn"|"amb"|"red" },
     { "label": "Beta vs. market", "value": "<${beta} — how volatile is this vs. the broader market?>", "color": "grn"|"amb"|"red" }
   ],
   "costCuts": [
-    { "title": "<#1 most important risk or red flag in the real data above>", "desc": "<1 sentence explaining what this means for an investor and what to watch>", "color": "red"|"amb"|"grn" },
-    { "title": "<2nd risk>", "desc": "<explanation>", "color": "red"|"amb"|"grn" },
-    { "title": "<3rd risk>", "desc": "<explanation>", "color": "red"|"amb"|"grn" }
+    { "title": "<#1 most meaningful risk for an investor in this specific company — be accurate, not alarmist>", "desc": "<1 sentence explaining what this means and what to monitor>", "color": "red"|"amb"|"grn" },
+    { "title": "<2nd risk or consideration>", "desc": "<explanation>", "color": "red"|"amb"|"grn" },
+    { "title": "<3rd risk or positive factor worth noting>", "desc": "<explanation>", "color": "red"|"amb"|"grn" }
   ],
   "isPublicStock": true,
   "dataSource": "Live data via Finnhub"
 }
 
 Rules:
-- Every value in "metrics" and "industryComparison" MUST reference the actual numbers provided above, not invented ones.
-- "costCuts" should reflect genuine risks visible in the real data, ordered most severe first.
+- Be sector-calibrated. A well-known S&P 500 company with strong margins and positive EPS should NOT score below 60 without genuinely serious risk factors.
+- Use the actual numbers provided — do not invent figures.
 - Return ONLY the JSON object.`;
 
   return await callGroqForJson(prompt);
