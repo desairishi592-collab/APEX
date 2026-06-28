@@ -300,7 +300,23 @@ async function handleStockAnalysis(ticker, companyName) {
   const peRatio = m['peNormalizedAnnual'] ? m['peNormalizedAnnual'].toFixed(1) : 'Unknown';
   const eps = m['epsNormalizedAnnual'] ? `$${m['epsNormalizedAnnual'].toFixed(2)}` : 'Unknown';
   const revenueGrowthRaw = m['revenueGrowth3Y'] || m['revenueGrowthQuarterlyYoy'] || m['revenueGrowth5Y'] || null;
-  const revenueGrowth = revenueGrowthRaw ? `${(revenueGrowthRaw * 100).toFixed(1)}%` : 'Unknown';
+
+  // Calculate real YoY revenue growth from the annual series data if available
+  // This is more accurate than Finnhub's pre-calculated growth fields which can be cumulative
+  let revenueGrowth = 'Unknown';
+  const annualRevenue = metrics?.series?.annual?.revenue;
+  if (annualRevenue && annualRevenue.length >= 2) {
+    const sorted = [...annualRevenue].sort((a, b) => new Date(b.period) - new Date(a.period));
+    const latest = sorted[0]?.v;
+    const prior = sorted[1]?.v;
+    if (latest && prior && prior !== 0) {
+      const yoyGrowth = ((latest - prior) / Math.abs(prior)) * 100;
+      revenueGrowth = `${yoyGrowth.toFixed(1)}%`;
+    }
+  } else if (revenueGrowthRaw !== null && Math.abs(revenueGrowthRaw) < 2) {
+    // Only use pre-calculated field if it looks like a reasonable annual rate (not cumulative)
+    revenueGrowth = `${(revenueGrowthRaw * 100).toFixed(1)}%`;
+  }
   const profitMargin = m['netProfitMarginAnnual'] ? `${m['netProfitMarginAnnual'].toFixed(1)}%` : 'Unknown';
   const debtEquity = m['totalDebt/totalEquityAnnual'] ? m['totalDebt/totalEquityAnnual'].toFixed(2) : 'Unknown';
   // ROE: Finnhub uses 'roeTTM' as the primary field name
