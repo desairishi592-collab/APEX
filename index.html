@@ -480,26 +480,6 @@
       <div style="font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 16px; margin-bottom: 6px;">APEX Pro — Coming Soon</div>
       <div style="font-size: 13px; color: var(--muted); line-height: 1.6; max-width: 400px; margin: 0 auto;">Unlimited scans, score trend over time, PDF exports, and more. Everything you're seeing now is free during our beta — Pro unlocks even more when it launches.</div>
     </div>
-
-    <!-- AI CHAT WIDGET -->
-    <div id="apex-chat" style="display:none; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 1.25rem;">
-      <div style="padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;">
-        <div style="width: 28px; height: 28px; border-radius: 50%; background: var(--accent-dim); display: flex; align-items: center; justify-content: center; font-size: 14px;">🤖</div>
-        <div>
-          <div style="font-size: 13px; font-weight: 600; color: var(--text);">Ask APEX AI</div>
-          <div style="font-size: 11px; color: var(--muted);">Based on your scan results — ask anything</div>
-        </div>
-      </div>
-      <div id="chat-messages" style="height: 280px; overflow-y: auto; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
-        <div class="chat-msg chat-ai" style="align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; color: var(--text); max-width: 85%; line-height: 1.6;">
-          I've reviewed the scan results. Ask me anything — is this a safe investment? How many shares should you buy with a given budget? When might be a good time to sell? I'll answer based on the actual data from this scan.
-        </div>
-      </div>
-      <div style="padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); display: flex; gap: 8px;">
-        <input id="chat-input" type="text" placeholder="e.g. Is this safe to invest in?" style="flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; outline: none;" onkeydown="if(event.key==='Enter') sendChatMessage()" />
-        <button onclick="sendChatMessage()" style="background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 9px 16px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; white-space: nowrap;">Send</button>
-      </div>
-    </div>
   </div>
 </div>
 
@@ -1297,9 +1277,40 @@
     show('s-connect');
   }
 
+</script>
+<!-- FLOATING CHAT BUTTON -->
+<div id="chat-fab" onclick="toggleChat()" style="display:none; position:fixed; bottom:24px; right:24px; width:56px; height:56px; border-radius:50%; background:var(--accent); box-shadow:0 4px 20px rgba(108,99,255,0.5); cursor:pointer; z-index:1000; align-items:center; justify-content:center; transition:transform 0.2s, box-shadow 0.2s;">
+  <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14px; color:#fff; letter-spacing:1px;">AX</div>
+  <div id="chat-unread" style="display:none; position:absolute; top:-2px; right:-2px; width:14px; height:14px; border-radius:50%; background:#22c55e; border:2px solid var(--bg);"></div>
+</div>
+
+<!-- CHAT POPUP PANEL -->
+<div id="chat-panel" style="display:none; position:fixed; bottom:92px; right:24px; width:360px; max-height:520px; background:var(--card); border:1px solid var(--border); border-radius:16px; box-shadow:0 8px 40px rgba(0,0,0,0.5); z-index:999; overflow:hidden; flex-direction:column; transition:opacity 0.2s, transform 0.2s; transform:translateY(8px); opacity:0;">
+  <!-- Panel header -->
+  <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--surface);">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="width:32px; height:32px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:12px; color:#fff; flex-shrink:0;">AX</div>
+      <div>
+        <div style="font-size:13px; font-weight:600; color:var(--text);">Ask APEX AI</div>
+        <div style="font-size:11px; color:var(--muted);">Based on your scan results</div>
+      </div>
+    </div>
+    <button onclick="toggleChat()" style="background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; padding:4px; line-height:1;">✕</button>
+  </div>
+  <!-- Messages -->
+  <div id="chat-messages" style="flex:1; overflow-y:auto; padding:1rem 1.25rem; display:flex; flex-direction:column; gap:0.75rem; min-height:200px; max-height:330px;"></div>
+  <!-- Input -->
+  <div style="padding:0.75rem 1rem; border-top:1px solid var(--border); display:flex; gap:8px; background:var(--surface);">
+    <input id="chat-input" type="text" placeholder="Ask about this scan…" style="flex:1; background:var(--card); border:1px solid var(--border); border-radius:20px; padding:8px 14px; font-size:13px; color:var(--text); font-family:'Inter',sans-serif; outline:none;" onkeydown="if(event.key==='Enter') sendChatMessage()" />
+    <button onclick="sendChatMessage()" style="background:var(--accent); color:#fff; border:none; border-radius:50%; width:36px; height:36px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0;">↑</button>
+  </div>
+</div>
+
+<script>
   // ── AI CHAT WIDGET ──
   let chatHistory = [];
   let chatScanContext = '';
+  let chatOpen = false;
 
   function buildChatContext(data, bizName, mode) {
     const score = data.score ?? '?';
@@ -1310,7 +1321,7 @@
     const industry = (data.industryComparison || []).map(i => `• ${i.label}: ${i.value}`).join('\n');
     const isStock = data.isPublicStock;
 
-    return `You are APEX AI, a financial analyst assistant. A user just ran an APEX ${isStock ? 'stock investment' : mode === 'investor' ? 'business investment' : 'business health'} scan. Here are the real results:
+    return `You are APEX AI, a financial analysis assistant embedded in the APEX business health scanner. A user just completed an APEX ${isStock ? 'stock investment' : mode === 'investor' ? 'business investment' : 'business health'} scan. Here are the real results:
 
 Company/Business: ${bizName}
 Score: ${score}/100
@@ -1326,21 +1337,44 @@ ${risks}
 Industry Comparison:
 ${industry}
 
-Your job: answer the user's questions about this specific scan result in plain, honest English. You can discuss whether it looks like a good investment, what the risks mean, how to think about position sizing, when to consider selling, etc. Be balanced — not overly bullish or bearish. If someone asks how many shares to buy, calculate it based on the current price if known. Always remind users that this is informational, not licensed financial advice, and that they should verify with a financial professional before making real investment decisions. Keep answers concise — 2-4 sentences unless a longer answer is genuinely needed.`;
+Your job: answer the user's questions about this specific scan in plain, honest English. You can discuss whether it looks like a good investment, what the risks mean, how to think about position sizing given a budget, when to consider selling, what specific metrics mean in context, etc.
+
+Be balanced and data-driven — not overly bullish or bearish. If someone asks how many shares to buy with a specific dollar amount, calculate it from the current price shown in the metrics above.
+
+Keep answers concise — 2-4 sentences. End every response with a brief reminder like: "Keep in mind this is data-driven analysis — make the final call yourself or with a financial advisor you trust." Make it feel natural, not like a legal warning.`;
   }
 
   function showChatWidget(data, bizName, mode) {
     chatHistory = [];
     chatScanContext = buildChatContext(data, bizName, mode);
-    const chat = document.getElementById('apex-chat');
     const messages = document.getElementById('chat-messages');
-    // Reset to welcome message only
-    messages.innerHTML = `
-      <div class="chat-msg chat-ai" style="align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px; padding: 10px 14px; font-size: 13px; color: var(--text); max-width: 85%; line-height: 1.6;">
-        I've reviewed the scan results for <strong>${bizName}</strong> — score ${data.score}/100, ${data.status}. Ask me anything about this scan: is it a safe investment? How many shares with a given budget? When to consider selling? I'll answer based on the actual data.
-      </div>`;
-    chat.style.display = 'block';
-    chat.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    messages.innerHTML = '';
+    addChatMessage(`I've reviewed the scan for **${bizName}** — scored ${data.score}/100, ${data.status}. Ask me anything: is it worth investing? How many shares with your budget? When to sell? I'll answer based on the actual data.`, 'ai');
+
+    const fab = document.getElementById('chat-fab');
+    fab.style.display = 'flex';
+    // Show green dot to indicate new results ready
+    document.getElementById('chat-unread').style.display = 'block';
+  }
+
+  function toggleChat() {
+    const panel = document.getElementById('chat-panel');
+    const fab = document.getElementById('chat-fab');
+    chatOpen = !chatOpen;
+
+    if (chatOpen) {
+      panel.style.display = 'flex';
+      requestAnimationFrame(() => {
+        panel.style.opacity = '1';
+        panel.style.transform = 'translateY(0)';
+      });
+      document.getElementById('chat-unread').style.display = 'none';
+      document.getElementById('chat-input').focus();
+    } else {
+      panel.style.opacity = '0';
+      panel.style.transform = 'translateY(8px)';
+      setTimeout(() => { panel.style.display = 'none'; }, 200);
+    }
   }
 
   function addChatMessage(text, role) {
@@ -1348,8 +1382,9 @@ Your job: answer the user's questions about this specific scan result in plain, 
     const isAI = role === 'ai';
     const div = document.createElement('div');
     div.className = 'chat-msg';
-    div.style.cssText = `align-self: ${isAI ? 'flex-start' : 'flex-end'}; background: ${isAI ? 'var(--surface)' : 'var(--accent)'}; border: 1px solid ${isAI ? 'var(--border)' : 'transparent'}; border-radius: ${isAI ? '12px 12px 12px 2px' : '12px 12px 2px 12px'}; padding: 10px 14px; font-size: 13px; color: var(--text); max-width: 85%; line-height: 1.6;`;
-    div.textContent = text;
+    div.style.cssText = `align-self:${isAI ? 'flex-start' : 'flex-end'}; background:${isAI ? 'var(--surface)' : 'var(--accent)'}; border:1px solid ${isAI ? 'var(--border)' : 'transparent'}; border-radius:${isAI ? '12px 12px 12px 2px' : '12px 12px 2px 12px'}; padding:9px 13px; font-size:13px; color:var(--text); max-width:88%; line-height:1.6; word-break:break-word;`;
+    // Bold support for **text**
+    div.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
     return div;
@@ -1359,8 +1394,7 @@ Your job: answer the user's questions about this specific scan result in plain, 
     const messages = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.id = 'chat-typing';
-    div.className = 'chat-msg';
-    div.style.cssText = 'align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: 12px 12px 12px 2px;';
+    div.style.cssText = 'align-self:flex-start; background:var(--surface); border:1px solid var(--border); border-radius:12px 12px 12px 2px; padding:10px 14px;';
     div.innerHTML = '<div class="chat-typing"><span></span><span></span><span></span></div>';
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
@@ -1370,7 +1404,7 @@ Your job: answer the user's questions about this specific scan result in plain, 
   async function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
-    if (!text) return;
+    if (!text || !chatScanContext) return;
     input.value = '';
 
     addChatMessage(text, 'user');
@@ -1382,14 +1416,11 @@ Your job: answer the user's questions about this specific scan result in plain, 
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: chatHistory,
-          systemPrompt: chatScanContext
-        })
+        body: JSON.stringify({ messages: chatHistory, systemPrompt: chatScanContext })
       });
 
       const data = await res.json();
-      const reply = data.reply || 'Sorry, I could not generate a response. Please try again.';
+      const reply = data.reply || 'Sorry, I couldn\'t generate a response. Please try again.';
       chatHistory.push({ role: 'assistant', content: reply });
       typing.remove();
       addChatMessage(reply, 'ai');
