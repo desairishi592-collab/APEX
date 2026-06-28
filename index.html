@@ -214,10 +214,13 @@
     <div class="nav-logo-mark">AX</div>
     <span class="nav-logo-text">APEX</span>
   </a>
-  <div class="nav-auth" id="nav-auth">
+  <!-- AUTH HIDDEN: login/signup buttons hidden during open-access beta. Restore when Pro launches. -->
+  <div class="nav-auth" id="nav-auth" style="display:none;">
     <button class="nav-account-btn" onclick="openAuth('login')" id="btn-login">Log in</button>
     <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')" id="btn-signup">Sign up</button>
   </div>
+  <!-- BETA BADGE: shows during open-access period -->
+  <span style="font-size:12px; background: var(--accent-dim); color: var(--accent); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--accent-glow); font-weight: 500;">Free beta — try everything</span>
 </nav>
 
 <!-- AUTH MODAL -->
@@ -430,50 +433,39 @@
       </div>
     </div>
 
-    <!-- LOCKED: employee pay, industry comparison, full action plan -->
-    <div class="locked-section">
-      <div class="dive-card" id="r-paycard">
-        <div class="dive-body">
-          <div class="section-title" id="r-pay-title">Employee pay benchmark</div>
-          <div id="r-pay-rows"></div>
-        </div>
-      </div>
+    <!-- FULLY UNLOCKED: all Pro features open during beta -->
+    <div class="metrics-grid" id="r-metrics" style="margin-bottom:1.25rem;"></div>
 
-      <div class="dive-card" id="r-industry-card">
-        <div class="dive-body">
-          <div class="section-title">How you compare to similar businesses</div>
-          <div id="r-industry-rows"></div>
-        </div>
+    <div class="dive-card" id="r-paycard">
+      <div class="dive-body">
+        <div class="section-title" id="r-pay-title">Employee pay benchmark</div>
+        <div id="r-pay-rows"></div>
       </div>
+    </div>
 
-      <div class="dive-card" id="r-cutcard">
-        <div class="dive-body">
-          <div class="section-title" id="r-cut-title">Full cost-cutting plan</div>
-          <div id="r-cut-rows"></div>
-        </div>
+    <div class="dive-card" id="r-industry-card">
+      <div class="dive-body">
+        <div class="section-title">How you compare to similar businesses</div>
+        <div id="r-industry-rows"></div>
       </div>
+    </div>
 
-      <div class="action-row" style="margin-bottom: 1.25rem;">
-        <button class="btn-outline" onclick="exportPdf()">⬇ Export PDF report</button>
+    <div class="dive-card" id="r-cutcard">
+      <div class="dive-body">
+        <div class="section-title" id="r-cut-title">Full cost-cutting plan</div>
+        <div id="r-cut-rows"></div>
       </div>
+    </div>
 
-      <div class="lock-overlay">
-        <div class="paywall-card">
-          <div class="pw-icon">🔒</div>
-          <h3 id="pw-title">Unlock your full report</h3>
-          <p id="pw-sub">Your score, key metrics, and top opportunity are free. Pro shows you everything else.</p>
-          <div class="pw-features" id="pw-features">
-            <div class="pw-feature">Employee pay benchmark vs. your industry</div>
-            <div class="pw-feature">How you compare to similar businesses</div>
-            <div class="pw-feature">Full prioritized cost-cutting plan, not just the top one</div>
-            <div class="pw-feature">Score trend over time as you rescan</div>
-            <div class="pw-feature">PDF export of your report</div>
-            <div class="pw-feature">Unlimited scans, no waiting</div>
-          </div>
-          <a class="unlock-btn" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank">Unlock full report — $20/mo</a>
-          <div class="pw-note">Cancel anytime · Secure payment via Stripe</div>
-        </div>
-      </div>
+    <div class="action-row" style="margin-bottom: 1.25rem;">
+      <button class="btn-outline" onclick="exportPdf()">⬇ Export PDF report</button>
+    </div>
+
+    <!-- PRO COMING SOON -->
+    <div style="background: var(--card); border: 1px solid var(--accent-glow); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-bottom: 1.25rem;">
+      <div style="font-size: 20px; margin-bottom: 8px;">🚀</div>
+      <div style="font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 16px; margin-bottom: 6px;">APEX Pro — Coming Soon</div>
+      <div style="font-size: 13px; color: var(--muted); line-height: 1.6; max-width: 400px; margin: 0 auto;">Unlimited scans, score trend over time, PDF exports, and more. Everything you're seeing now is free during our beta — Pro unlocks even more when it launches.</div>
     </div>
   </div>
 </div>
@@ -949,12 +941,13 @@
     reader.readAsText(f);
   }
 
-  // Returns true if the scan is allowed to proceed; shows the right error and returns false otherwise.
-  // errBoxId lets the private and public stock forms show errors in their own error box.
+  // BETA MODE: all scans open, no auth required, no limits.
+  // Original gating logic preserved in comments below — restore when Pro launches.
   async function checkScanAllowed(errBoxId) {
     const errEl = document.getElementById(errBoxId);
     errEl.style.display = 'none';
-
+    return true; // Always allow during open beta
+    /* RESTORE FOR PRO LAUNCH:
     if (!currentUser && !isGuest) {
       errEl.textContent = '⚠ Please log in, sign up, or continue as a guest to run a health scan.';
       errEl.style.display = 'block';
@@ -962,30 +955,25 @@
       openAuth('signup');
       return false;
     }
-
-    // Scan gating: free logged-in users get FREE_SCAN_LIMIT scans, then a wait window (unless Pro/preview)
     if (currentUser && !effectiveIsPro() && scanCount >= FREE_SCAN_LIMIT) {
       const remaining = waitTimeRemaining();
       if (remaining) {
-        errEl.innerHTML = `⚠ You're out of free scans. Wait ${remaining}, or <a href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" style="color: var(--accent); text-decoration: underline;">upgrade to Pro</a> for unlimited scans now.`;
+        errEl.innerHTML = `⚠ You're out of free scans. Wait ${remaining}, or upgrade to Pro for unlimited scans now.`;
         errEl.style.display = 'block';
         return false;
       } else {
-        // Wait window has passed — reset and let them scan again
         scanCount = 0;
         lastScanLimitHitAt = null;
         await sb.from('profiles').update({ scan_count: 0, scan_limit_hit_at: null }).eq('id', currentUser.id);
       }
     }
-
-    // Scan gating: guests get GUEST_SCAN_LIMIT scan(s), unsaved
     if (isGuest && guestScanCount >= GUEST_SCAN_LIMIT) {
-      errEl.innerHTML = `⚠ You've used your free guest scan. <a onclick="closeGuestWarning(); openAuth('signup')" style="color: var(--accent); text-decoration: underline; cursor:pointer;">Sign up</a> to keep scanning and save your results.`;
+      errEl.innerHTML = `⚠ You've used your free guest scan. Sign up to keep scanning.`;
       errEl.style.display = 'block';
       return false;
     }
-
     return true;
+    */
   }
 
   async function runScan() {
@@ -1220,12 +1208,7 @@
     // PRO: score trend over time for this business (only shown if there's history)
     loadScoreTrend(currentScanBizName);
 
-    // Show lock overlay only for non-Pro users (real Pro or dev preview unlocks it)
-    const lockOverlay = document.querySelector('.lock-overlay');
-    if (lockOverlay) {
-      lockOverlay.style.display = effectiveIsPro() ? 'none' : 'flex';
-    }
-
+    // BETA: everything fully unlocked — no paywall. Restore lock overlay logic for Pro launch.
 
     show('s-results');
   }
