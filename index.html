@@ -304,8 +304,8 @@
     <div class="nav-logo-mark">AX</div>
     <span class="nav-logo-text">APEX</span>
   </a>
-  <!-- AUTH HIDDEN: login/signup buttons hidden during open-access beta. Restore when Pro launches. -->
-  <div class="nav-auth" id="nav-auth" style="display:none;">
+  <!-- PHASE 2: user accounts enabled -->
+  <div class="nav-auth" id="nav-auth">
     <button class="nav-account-btn" onclick="openAuth('login')" id="btn-login">Log in</button>
     <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')" id="btn-signup">Sign up</button>
   </div>
@@ -317,23 +317,34 @@
 <div class="auth-overlay" id="auth-overlay">
   <div class="auth-modal">
     <button class="auth-close" onclick="pendingScanAfterAuth = false; closeAuth();">✕</button>
-    <h2 id="auth-title">Log in to APEX</h2>
-    <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
-    <div class="auth-field">
-      <label>Email</label>
-      <input type="email" id="auth-email" placeholder="you@example.com" />
+    <div id="auth-form-view">
+      <h2 id="auth-title">Log in to APEX</h2>
+      <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
+      <div class="auth-field">
+        <label>Email</label>
+        <input type="email" id="auth-email" placeholder="you@example.com" />
+      </div>
+      <div class="auth-field">
+        <label>Password</label>
+        <input type="password" id="auth-password" placeholder="••••••••" />
+      </div>
+      <button class="btn btn-accent btn-full" onclick="submitAuth()" id="auth-submit-btn">Log in</button>
+      <div class="auth-err" id="auth-err"></div>
+      <div class="auth-switch" id="auth-switch">
+        Don't have an account? <a onclick="openAuth('signup')">Sign up</a>
+      </div>
+      <div class="auth-switch" id="auth-guest-row" style="margin-top: 6px;">
+        <a onclick="confirmGuest()">Continue without an account</a>
+      </div>
     </div>
-    <div class="auth-field">
-      <label>Password</label>
-      <input type="password" id="auth-password" placeholder="••••••••" />
-    </div>
-    <button class="btn btn-accent btn-full" onclick="submitAuth()" id="auth-submit-btn">Log in</button>
-    <div class="auth-err" id="auth-err"></div>
-    <div class="auth-switch" id="auth-switch">
-      Don't have an account? <a onclick="openAuth('signup')">Sign up</a>
-    </div>
-    <div class="auth-switch" id="auth-guest-row" style="margin-top: 6px;">
-      <a onclick="confirmGuest()">Continue without an account</a>
+    <div id="auth-confirm-view" style="display:none;">
+      <h2>Confirm your email</h2>
+      <p class="auth-sub">We've sent a confirmation link to <strong id="auth-confirm-email"></strong>. Click it to activate your account, then log in below.</p>
+      <button class="btn btn-outline btn-full" onclick="resendConfirmation()" id="auth-resend-btn">Resend confirmation email</button>
+      <div class="auth-err" id="auth-confirm-err"></div>
+      <div class="auth-switch" style="margin-top: 14px;">
+        <a onclick="openAuth('login')">Back to log in</a>
+      </div>
     </div>
   </div>
 </div>
@@ -646,6 +657,7 @@
   let currentUser = null;
   let isPro = false;
   let authMode = 'login';
+  let pendingConfirmEmail = '';
   let scanCount = 0;
   let isGuest = false;
   let guestScanCount = 0;
@@ -792,6 +804,8 @@
   function openAuth(mode) {
     authMode = mode;
     document.getElementById('auth-overlay').classList.add('active');
+    document.getElementById('auth-form-view').style.display = 'block';
+    document.getElementById('auth-confirm-view').style.display = 'none';
     document.getElementById('auth-err').style.display = 'none';
     document.getElementById('auth-email').value = '';
     document.getElementById('auth-password').value = '';
@@ -852,6 +866,7 @@
       // just showing a raw error, try logging in with the same credentials before giving up.
       if (result.error) {
         const isRateLimit = /rate limit/i.test(result.error.message || '');
+        const isUnconfirmed = /email not confirmed/i.test(result.error.message || '');
         if (isRateLimit && authMode === 'signup') {
           const retryLogin = await sb.auth.signInWithPassword({ email, password });
           if (!retryLogin.error) {
@@ -861,9 +876,19 @@
             errEl.style.display = 'block';
             return;
           }
+        } else if (isUnconfirmed) {
+          showConfirmPendingView(email);
+          return;
         } else {
           throw result.error;
         }
+      }
+
+      // With email confirmations enabled, signUp() succeeds but returns no session until the
+      // user clicks the link in their inbox — don't treat that as a completed login.
+      if (authMode === 'signup' && result.data.user && !result.data.session) {
+        showConfirmPendingView(email);
+        return;
       }
 
       currentUser = result.data.user;
@@ -898,6 +923,32 @@
         msg = e;
       }
       errEl.textContent = msg;
+      errEl.style.display = 'block';
+    }
+  }
+
+  function showConfirmPendingView(email) {
+    pendingConfirmEmail = email;
+    document.getElementById('auth-confirm-email').textContent = email;
+    document.getElementById('auth-confirm-err').style.display = 'none';
+    document.getElementById('auth-confirm-err').textContent = '';
+    document.getElementById('auth-form-view').style.display = 'none';
+    document.getElementById('auth-confirm-view').style.display = 'block';
+  }
+
+  async function resendConfirmation() {
+    const errEl = document.getElementById('auth-confirm-err');
+    errEl.style.display = 'none';
+    if (!pendingConfirmEmail) return;
+    try {
+      const { error } = await sb.auth.resend({ type: 'signup', email: pendingConfirmEmail });
+      if (error) throw error;
+      errEl.style.color = '#86efac';
+      errEl.textContent = 'Confirmation email resent — check your inbox.';
+      errEl.style.display = 'block';
+    } catch (e) {
+      errEl.style.color = '';
+      errEl.textContent = (e && e.message) || 'Could not resend right now. Please try again shortly.';
       errEl.style.display = 'block';
     }
   }
