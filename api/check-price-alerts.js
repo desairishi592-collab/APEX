@@ -30,7 +30,8 @@ async function sendAlertEmail(resendKey, alert, currentPrice) {
       html: `<p>Good news — <strong>${alert.company_name || alert.ticker} (${alert.ticker})</strong> just hit your target price of <strong>$${alert.target_price}</strong>. It's currently trading at $${currentPrice.toFixed(2)}.</p><p>This might be the entry point you were waiting for.</p>`
     })
   });
-  return res.ok;
+  const rawText = await res.text(); // TEMP: surfaced via resendDebug below, remove once email delivery is confirmed
+  return { ok: res.ok, status: res.status, raw: rawText.slice(0, 300) };
 }
 
 // Runs on a schedule (see vercel.json crons) to check every active price alert against
@@ -105,6 +106,7 @@ export default async function handler(req) {
   }));
 
   let triggeredCount = 0, emailedCount = 0;
+  const resendDebug = []; // TEMP: remove once email delivery is confirmed
 
   for (const alert of alerts) {
     const currentPrice = priceByTicker[alert.ticker];
@@ -118,11 +120,13 @@ export default async function handler(req) {
     if (resendKey) {
       try {
         const sent = await sendAlertEmail(resendKey, alert, currentPrice);
-        if (sent) {
+        resendDebug.push({ alertId: alert.id, ...sent });
+        if (sent.ok) {
           emailedCount++;
           await patchAlert(serviceRoleKey, alert.id, { notified_at: new Date().toISOString() });
         }
-      } catch {
+      } catch (e) {
+        resendDebug.push({ alertId: alert.id, sendError: e.message });
         // Non-fatal: alert is still marked triggered so it won't re-fire; email can be retried manually
       }
     }
@@ -134,6 +138,7 @@ export default async function handler(req) {
     triggered: triggeredCount,
     emailed: emailedCount,
     debugTickerInfo, // TEMP: remove once the live trigger path is confirmed working
-    keyDebug // TEMP: remove once the live trigger path is confirmed working
+    keyDebug, // TEMP: remove once the live trigger path is confirmed working
+    resendDebug // TEMP: remove once email delivery is confirmed
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
