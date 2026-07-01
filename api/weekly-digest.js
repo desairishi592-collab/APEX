@@ -137,10 +137,8 @@ export default async function handler(req) {
     });
   }
 
-  const reqUrl = new URL(req.url);
-  const origin = reqUrl.origin;
+  const origin = new URL(req.url).origin;
   const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
-  const debugForceEmail = reqUrl.searchParams.get('debugForceEmail'); // TEMP: remove once live send is confirmed
 
   let users;
   try {
@@ -152,12 +150,10 @@ export default async function handler(req) {
   }
 
   let usersChecked = 0, emailsSent = 0;
-  const debugUsers = []; // TEMP: remove once the live digest path is confirmed working
 
   for (const user of users) {
     if (!user.email) continue;
     usersChecked++;
-    const userDebug = { email: user.email };
 
     // ── 1. Business health score trend (owner-mode scans only) ──
     let scoreTrend = null;
@@ -166,7 +162,6 @@ export default async function handler(req) {
         serviceRoleKey,
         `scans?select=business_name,score,created_at&user_id=eq.${user.id}&mode=eq.owner&order=created_at.desc&limit=2`
       );
-      userDebug.scanCount = scans.length;
       if (scans.length >= 2 && typeof scans[0].score === 'number' && typeof scans[1].score === 'number') {
         scoreTrend = {
           businessName: scans[0].business_name || 'Your business',
@@ -175,8 +170,8 @@ export default async function handler(req) {
           delta: scans[0].score - scans[1].score
         };
       }
-    } catch (e) {
-      userDebug.scanError = e.message;
+    } catch {
+      // Non-fatal: skip the trend section for this user this week
     }
 
     // ── 2. Watchlist signal changes (re-scans each ticker fresh, then updates the baseline) ──
@@ -186,7 +181,6 @@ export default async function handler(req) {
         serviceRoleKey,
         `watchlist?select=ticker,company_name,signal,safety_score,score&user_id=eq.${user.id}`
       );
-      userDebug.watchlistCount = watchlist.length;
       for (const row of watchlist) {
         const fresh = await fetchFreshSignal(origin, row.ticker, row.company_name);
         if (!fresh) continue;
@@ -197,8 +191,8 @@ export default async function handler(req) {
           signal: fresh.signal, safety_score: fresh.safetyScore, score: fresh.score
         });
       }
-    } catch (e) {
-      userDebug.watchlistError = e.message;
+    } catch {
+      // Non-fatal: skip the signal-change section for this user this week
     }
 
     // ── 3. Price alerts triggered in the past week ──
@@ -208,24 +202,12 @@ export default async function handler(req) {
         serviceRoleKey,
         `price_alerts?select=ticker,company_name,target_price,triggered_at&user_id=eq.${user.id}&status=eq.triggered&triggered_at=gte.${sevenDaysAgo}`
       );
-    } catch (e) {
-      userDebug.alertsError = e.message;
+    } catch {
+      // Non-fatal: skip the triggered-alerts section for this user this week
     }
 
-    userDebug.scoreTrend = scoreTrend;
-    userDebug.signalChanges = signalChanges;
-    userDebug.triggeredAlerts = triggeredAlerts;
-
-    if (!scoreTrend && !signalChanges.length && !triggeredAlerts.length) {
-      userDebug.skipped = 'nothing to report';
-      debugUsers.push(userDebug);
-      continue;
-    }
-    if (!resendKey) {
-      userDebug.skipped = 'no resend key';
-      debugUsers.push(userDebug);
-      continue;
-    }
+    if (!scoreTrend && !signalChanges.length && !triggeredAlerts.length) continue;
+    if (!resendKey) continue;
 
     const sections = [
       scoreTrendSection(scoreTrend),
@@ -234,16 +216,14 @@ export default async function handler(req) {
     ];
 
     try {
-      const sent = await sendDigestEmail(resendKey, debugForceEmail || user.email, sections); // TEMP: debugForceEmail override
-      userDebug.sent = sent;
+      const sent = await sendDigestEmail(resendKey, user.email, sections);
       if (sent) emailsSent++;
-    } catch (e) {
-      userDebug.sendError = e.message;
+    } catch {
+      // Non-fatal: this user just misses this week's digest
     }
-    debugUsers.push(userDebug);
   }
 
-  return new Response(JSON.stringify({ usersChecked, emailsSent, debugUsers }), {
+  return new Response(JSON.stringify({ usersChecked, emailsSent }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }
