@@ -377,7 +377,7 @@
     <div class="am-status" id="am-status">—</div>
     <div class="am-row">
       <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:block;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
-      <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">Scan history</button>
+      <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">My Scan History</button>
     </div>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openWatchlist()" id="am-watchlist-btn">My Watchlist</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
@@ -392,7 +392,7 @@
 <div class="auth-overlay" id="history-overlay">
   <div class="history-modal">
     <button class="auth-close" onclick="closeHistory()">✕</button>
-    <h2>Scan history</h2>
+    <h2>My Scan History</h2>
     <div class="history-sub">Your past business health scans.</div>
     <div class="history-list" id="history-list">
       <div class="history-loading">Loading scans…</div>
@@ -1034,6 +1034,8 @@
     document.getElementById('history-overlay').classList.remove('active');
   }
 
+  let historyData = []; // cached rows from the last loadHistory(), looked up by index when a row is clicked
+
   async function loadHistory() {
     const listEl = document.getElementById('history-list');
     listEl.innerHTML = '<div class="history-loading">Loading scans…</div>';
@@ -1046,19 +1048,21 @@
     try {
       const { data, error } = await sb
         .from('scans')
-        .select('business_name, industry, score, status, created_at, mode')
+        .select('business_name, industry, score, status, created_at, mode, full_data')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (error) throw error;
 
-      if (!data || data.length === 0) {
+      historyData = data || [];
+
+      if (historyData.length === 0) {
         listEl.innerHTML = '<div class="history-empty">No scans yet — run your first health scan to see it here.</div>';
         return;
       }
 
-      listEl.innerHTML = data.map(s => {
+      listEl.innerHTML = historyData.map((s, i) => {
         const score = s.score ?? 0;
         const scoreClass = score >= 70 ? 'hs-good' : score >= 45 ? 'hs-warn' : 'hs-bad';
         const date = new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -1067,18 +1071,32 @@
         const mode = s.mode === 'investor' ? 'investor' : 'owner';
         const modeLabel = mode === 'investor' ? 'Investor' : 'Owner';
         return `
-          <div class="history-item">
+          <div class="history-item" onclick="viewHistoryScan(${i})">
             <div class="history-score ${scoreClass}">${score}</div>
             <div class="history-info">
               <div class="history-biz">${bizName}</div>
               <div class="history-meta">${industry} · ${date}</div>
             </div>
             <span class="history-mode-tag ${mode}">${modeLabel}</span>
+            <span style="color:var(--dim); font-size:15px; flex-shrink:0;">›</span>
           </div>`;
       }).join('');
     } catch (e) {
       listEl.innerHTML = '<div class="history-empty">Couldn\'t load scan history. Please try again.</div>';
     }
+  }
+
+  function viewHistoryScan(index) {
+    const row = historyData[index];
+    if (!row || !row.full_data) return;
+
+    scanMode = row.mode === 'investor' ? 'investor' : 'owner';
+    scanData = row.full_data;
+    currentScanBizName = row.business_name || '';
+    currentStockTicker = scanData.isPublicStock ? (row.business_name || null) : null;
+
+    closeHistory();
+    renderResults(scanData);
   }
 
   // ── WATCHLIST ──
