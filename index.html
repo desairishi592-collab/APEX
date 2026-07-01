@@ -54,6 +54,17 @@
     .biz-grid input::placeholder { color: var(--dim); }
     .biz-grid select option { background: var(--card); }
 
+    .search-wrap { position: relative; }
+    .search-wrap input { width: 100%; box-sizing: border-box; }
+    .search-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 260px; overflow-y: auto; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+    .search-result { padding: 10px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; border-bottom: 1px solid var(--border); }
+    .search-result:last-child { border-bottom: none; }
+    .search-result:hover { background: var(--surface); }
+    .search-result .sr-symbol { font-weight: 600; color: var(--text); flex-shrink: 0; }
+    .search-result .sr-desc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .search-result.search-empty { color: var(--muted); cursor: default; }
+    .search-result.search-empty:hover { background: none; }
+
     .btn { padding: 10px 20px; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; transition: opacity 0.2s, transform 0.1s; }
     .btn:hover { opacity: 0.88; }
     .btn:active { transform: scale(0.98); }
@@ -380,7 +391,10 @@
     <div id="form-public" style="display:none;">
       <span class="biz-label">Tell APEX which stock to evaluate</span>
       <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
-        <input type="text" id="stock-ticker" placeholder="Ticker symbol (e.g. AAPL)" />
+        <div class="search-wrap">
+          <input type="text" id="stock-ticker" placeholder="Search company or ticker (e.g. Apple or AAPL)" autocomplete="off" oninput="onStockSearchInput(this.value)" onfocus="onStockSearchInput(this.value)" />
+          <div class="search-dropdown" id="stock-search-dropdown" style="display:none;"></div>
+        </div>
         <input type="text" id="stock-name" placeholder="Company name (optional)" />
       </div>
       <div class="err" id="stock-disclaimer" style="display:block; background: var(--green-dim); border-color: rgba(34,197,94,0.25); color: #86efac;">
@@ -1098,6 +1112,67 @@
   }
 
   // ── PUBLIC STOCK SCAN (investor mode only) ──
+  // ── STOCK SEARCH AUTOCOMPLETE ──
+  let stockSearchDebounce = null;
+  let stockSearchAbortController = null;
+  let lastStockSearchResults = [];
+
+  function onStockSearchInput(query) {
+    const dropdown = document.getElementById('stock-search-dropdown');
+    clearTimeout(stockSearchDebounce);
+    const q = query.trim();
+    if (!q) {
+      dropdown.style.display = 'none';
+      dropdown.innerHTML = '';
+      return;
+    }
+    stockSearchDebounce = setTimeout(() => fetchStockSearch(q), 300);
+  }
+
+  async function fetchStockSearch(q) {
+    const dropdown = document.getElementById('stock-search-dropdown');
+    if (stockSearchAbortController) stockSearchAbortController.abort();
+    stockSearchAbortController = new AbortController();
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: stockSearchAbortController.signal });
+      const data = await res.json();
+      lastStockSearchResults = data.results || [];
+      if (!lastStockSearchResults.length) {
+        dropdown.innerHTML = '<div class="search-result search-empty">No matches found</div>';
+        dropdown.style.display = 'block';
+        return;
+      }
+      dropdown.innerHTML = lastStockSearchResults.map((r, i) => `
+        <div class="search-result" data-idx="${i}">
+          <span class="sr-symbol">${escapeHtml(r.symbol)}</span>
+          <span class="sr-desc">${escapeHtml(r.description)}</span>
+        </div>`).join('');
+      dropdown.style.display = 'block';
+    } catch (e) {
+      if (e.name !== 'AbortError') dropdown.style.display = 'none';
+    }
+  }
+
+  document.addEventListener('click', (e) => {
+    const item = e.target.closest('.search-result:not(.search-empty)');
+    if (item) {
+      const r = lastStockSearchResults[Number(item.dataset.idx)];
+      if (r) selectStockSearchResult(r.symbol, r.description);
+      return;
+    }
+    if (!e.target.closest('.search-wrap')) {
+      const dropdown = document.getElementById('stock-search-dropdown');
+      if (dropdown) dropdown.style.display = 'none';
+    }
+  });
+
+  function selectStockSearchResult(symbol, description) {
+    document.getElementById('stock-ticker').value = symbol;
+    document.getElementById('stock-name').value = description;
+    document.getElementById('stock-search-dropdown').style.display = 'none';
+    runStockScan();
+  }
+
   async function runStockScan() {
     if (!(await checkScanAllowed('stock-err-box'))) return;
 
