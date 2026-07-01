@@ -58,6 +58,15 @@ export default async function handler(req) {
     });
   }
 
+  // TEMP: safe partial reveal to diagnose a key-value mismatch, remove once resolved
+  const keyDebug = {
+    finnhubKeyLength: finnhubKey.length,
+    finnhubKeyPreview: finnhubKey.slice(0, 4) + '...' + finnhubKey.slice(-4),
+    finnhubKeyHasWhitespace: /\s/.test(finnhubKey),
+    serviceRoleKeyLength: serviceRoleKey.length,
+    resendKeySet: !!resendKey
+  };
+
   let alerts;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/price_alerts?select=*&status=eq.active`, {
@@ -124,6 +133,7 @@ export default async function handler(req) {
     tickers: tickers.length,
     triggered: triggeredCount,
     emailed: emailedCount,
-    debugTickerInfo // TEMP: remove once the live trigger path is confirmed working
+    debugTickerInfo, // TEMP: remove once the live trigger path is confirmed working
+    keyDebug // TEMP: remove once the live trigger path is confirmed working
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
