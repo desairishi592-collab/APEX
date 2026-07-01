@@ -226,9 +226,13 @@ ${orderingRule}
       if (scanMode !== 'owner') return; // payroll safety calculator is an owner-mode feature only
       const revenueNum = parseMoney(revenue);
       const expensesNum = parseMoney(expenses);
+      const employeesNum = parseMoney(employees);
       let score = Number(parsed.score);
       if (!Number.isFinite(score)) score = 50;
       parsed.payrollSafety = computePayrollSafety(revenueNum, expensesNum, score);
+      // Baseline numbers for the client-side "what if" simulator — stored in full_data
+      // alongside the rest of the scan so it keeps working when viewed from history later.
+      parsed.whatIfBaseline = { revenue: revenueNum, expenses: expensesNum, employees: employeesNum };
     });
 
   } catch (e) {

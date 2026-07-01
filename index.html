@@ -169,6 +169,36 @@
     .payroll-safety-card.no-margin { background: var(--red-dim); border-color: rgba(239,68,68,0.35); }
     .payroll-safety-card.no-margin .payroll-safety-label { color: var(--red); }
 
+    /* WHAT-IF SIMULATOR */
+    .simulator-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+    .simulator-label { font-size: 12px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 14px; }
+    .simulator-score-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+    .simulator-score { font-family: 'Space Grotesk', sans-serif; font-size: 40px; font-weight: 700; color: var(--text); line-height: 1; transition: color 0.2s; }
+    .simulator-delta { font-size: 15px; font-weight: 600; padding: 3px 10px; border-radius: 12px; display: none; }
+    .simulator-delta.up { display: inline-block; color: var(--green); background: var(--green-dim); }
+    .simulator-delta.down { display: inline-block; color: var(--red); background: var(--red-dim); }
+    .sim-slider-group { margin-bottom: 18px; }
+    .sim-slider-group:last-of-type { margin-bottom: 14px; }
+    .sim-slider-head { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .sim-slider-head .sim-slider-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .sim-slider-group input[type="range"] {
+      -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 2px;
+      background: var(--border); outline: none; cursor: pointer; margin: 0;
+    }
+    .sim-slider-group input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%;
+      background: var(--accent); border: 2px solid var(--text); cursor: pointer; box-shadow: 0 0 0 4px var(--accent-dim);
+    }
+    .sim-slider-group input[type="range"]::-moz-range-thumb {
+      width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--text);
+      cursor: pointer; box-shadow: 0 0 0 4px var(--accent-dim);
+    }
+    .sim-reset-btn {
+      background: none; border: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 500;
+      padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer; transition: border-color 0.15s, color 0.15s;
+    }
+    .sim-reset-btn:hover { border-color: var(--border-hover); color: var(--text); }
+
     /* FIX THIS FIRST CALLOUT */
     .fix-first-card { background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.4); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display: flex; gap: 12px; align-items: flex-start; }
     .fix-first-card .insight-ico { background: rgba(245,158,11,0.3); }
@@ -597,6 +627,37 @@
       <div class="payroll-safety-amount" id="r-payroll-safety-amount">$0</div>
       <div class="payroll-safety-headline" id="r-payroll-safety-headline">The maximum you can safely pay in total salaries this month</div>
       <div class="payroll-safety-explanation" id="r-payroll-safety-explanation">—</div>
+    </div>
+
+    <!-- OWNER ONLY: "What if" simulator -->
+    <div class="simulator-card" id="r-simulator-card" style="display:none;">
+      <div class="simulator-label">🎛️ What if…</div>
+      <div class="simulator-score-row">
+        <div class="simulator-score" id="sim-score">—</div>
+        <div class="simulator-delta" id="sim-delta"></div>
+      </div>
+      <div class="sim-slider-group">
+        <div class="sim-slider-head">
+          <span>Revenue</span>
+          <span class="sim-slider-val" id="sim-revenue-val">—</span>
+        </div>
+        <input type="range" id="sim-revenue-slider" min="-50" max="50" step="1" value="0" oninput="updateSimulator()">
+      </div>
+      <div class="sim-slider-group">
+        <div class="sim-slider-head">
+          <span>Expenses</span>
+          <span class="sim-slider-val" id="sim-expenses-val">—</span>
+        </div>
+        <input type="range" id="sim-expenses-slider" min="-50" max="50" step="1" value="0" oninput="updateSimulator()">
+      </div>
+      <div class="sim-slider-group">
+        <div class="sim-slider-head">
+          <span>Employees</span>
+          <span class="sim-slider-val" id="sim-employees-val">—</span>
+        </div>
+        <input type="range" id="sim-employees-slider" min="-50" max="50" step="1" value="0" oninput="updateSimulator()">
+      </div>
+      <button class="sim-reset-btn" onclick="resetSimulator()">Reset</button>
     </div>
 
     <!-- FREE: the 4 key metrics — a real, complete snapshot, not a teaser -->
@@ -1998,6 +2059,9 @@
         </div>`).join('');
     }
 
+    // OWNER ONLY: "what if" simulator
+    initSimulator(d);
+
     // OWNER ONLY: payroll safety calculator
     const payrollSafetyCard = document.getElementById('r-payroll-safety-card');
     if (payrollSafetyCard) {
@@ -2194,6 +2258,87 @@
     showChatWidget(d, currentScanBizName, scanMode);
 
     show('s-results');
+  }
+
+  // ── "WHAT IF" SIMULATOR (owner mode only, purely client-side — no API call) ──
+  let simBaseline = null;
+
+  function initSimulator(d) {
+    const card = document.getElementById('r-simulator-card');
+    if (!card) return;
+
+    const b = d.whatIfBaseline;
+    if (scanMode !== 'owner' || d.isPublicStock || !b || !(b.revenue > 0) || !(b.expenses >= 0) || !(b.employees > 0)) {
+      card.style.display = 'none';
+      simBaseline = null;
+      return;
+    }
+
+    simBaseline = { revenue: b.revenue, expenses: b.expenses, employees: b.employees, score: d.score };
+    card.style.display = 'block';
+    ['sim-revenue-slider', 'sim-expenses-slider', 'sim-employees-slider'].forEach(id => {
+      document.getElementById(id).value = 0;
+    });
+    updateSimulator();
+  }
+
+  function resetSimulator() {
+    ['sim-revenue-slider', 'sim-expenses-slider', 'sim-employees-slider'].forEach(id => {
+      document.getElementById(id).value = 0;
+    });
+    updateSimulator();
+  }
+
+  function formatWhatIfMoney(n) {
+    return '$' + Math.round(n).toLocaleString('en-US');
+  }
+
+  function updateSimulator() {
+    if (!simBaseline) return;
+
+    const revenuePct = Number(document.getElementById('sim-revenue-slider').value);
+    const expensesPct = Number(document.getElementById('sim-expenses-slider').value);
+    const employeesPct = Number(document.getElementById('sim-employees-slider').value);
+
+    const revMult = 1 + revenuePct / 100;
+    const expMult = 1 + expensesPct / 100;
+    const empMult = 1 + employeesPct / 100;
+
+    const newRevenue = simBaseline.revenue * revMult;
+    const newExpenses = simBaseline.expenses * expMult;
+    const newEmployees = Math.max(1, Math.round(simBaseline.employees * empMult));
+
+    document.getElementById('sim-revenue-val').textContent = `${formatWhatIfMoney(newRevenue)} (${revenuePct > 0 ? '+' : ''}${revenuePct}%)`;
+    document.getElementById('sim-expenses-val').textContent = `${formatWhatIfMoney(newExpenses)} (${expensesPct > 0 ? '+' : ''}${expensesPct}%)`;
+    document.getElementById('sim-employees-val').textContent = `${newEmployees} (${employeesPct > 0 ? '+' : ''}${employeesPct}%)`;
+
+    // Deterministic, transparent recalculation — no new API call. Driven by the two
+    // levers a health score actually responds to: profit margin and revenue-per-employee
+    // (a proxy for operating efficiency), both compared against the original scan's baseline.
+    const baseMargin = simBaseline.revenue > 0 ? (simBaseline.revenue - simBaseline.expenses) / simBaseline.revenue : 0;
+    const newMargin = newRevenue > 0 ? (newRevenue - newExpenses) / newRevenue : 0;
+    const marginDeltaPts = (newMargin - baseMargin) * 100;
+
+    const baseRevPerEmployee = simBaseline.revenue / simBaseline.employees;
+    const newRevPerEmployee = newRevenue / newEmployees;
+    const efficiencyDeltaPct = baseRevPerEmployee > 0 ? ((newRevPerEmployee - baseRevPerEmployee) / baseRevPerEmployee) * 100 : 0;
+
+    const scoreDelta = Math.round(marginDeltaPts * 0.8 + efficiencyDeltaPct * 0.15);
+    const newScore = Math.max(0, Math.min(100, simBaseline.score + scoreDelta));
+    const displayDelta = newScore - simBaseline.score;
+
+    document.getElementById('sim-score').textContent = newScore;
+    const deltaEl = document.getElementById('sim-delta');
+    if (displayDelta === 0) {
+      deltaEl.className = 'simulator-delta';
+      deltaEl.textContent = '';
+    } else if (displayDelta > 0) {
+      deltaEl.className = 'simulator-delta up';
+      deltaEl.textContent = `▲ +${displayDelta}`;
+    } else {
+      deltaEl.className = 'simulator-delta down';
+      deltaEl.textContent = `▼ ${displayDelta}`;
+    }
   }
 
   // ── PDF EXPORT (Pro only) ──
