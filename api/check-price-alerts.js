@@ -81,14 +81,17 @@ export default async function handler(req) {
   // multiple alerts) are watching the same stock.
   const tickers = [...new Set(alerts.map(a => a.ticker))];
   const priceByTicker = {};
+  const debugTickerInfo = []; // TEMP: remove once the live trigger path is confirmed working
   await Promise.all(tickers.map(async (ticker) => {
     try {
       const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=${finnhubKey}`);
-      if (!res.ok) return;
-      const data = await res.json();
+      const rawText = await res.text();
+      let data = null;
+      try { data = JSON.parse(rawText); } catch {}
       if (data && typeof data.c === 'number' && data.c > 0) priceByTicker[ticker] = data.c;
-    } catch {
-      // Non-fatal: this ticker's alerts just get skipped this run
+      debugTickerInfo.push({ ticker, httpStatus: res.status, ok: res.ok, raw: rawText.slice(0, 300) });
+    } catch (e) {
+      debugTickerInfo.push({ ticker, fetchError: e.message });
     }
   }));
 
@@ -120,6 +123,7 @@ export default async function handler(req) {
     checked: alerts.length,
     tickers: tickers.length,
     triggered: triggeredCount,
-    emailed: emailedCount
+    emailed: emailedCount,
+    debugTickerInfo // TEMP: remove once the live trigger path is confirmed working
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
