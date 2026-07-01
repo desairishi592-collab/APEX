@@ -158,6 +158,15 @@
     .compare-row .cr-label { color: var(--muted); }
     .compare-row .cr-val { font-weight: 500; color: var(--text); text-align: right; }
 
+    /* PAYROLL SAFETY CALCULATOR */
+    .payroll-safety-card { background: var(--green-dim); border: 1px solid rgba(34,197,94,0.35); border-radius: var(--radius); padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+    .payroll-safety-label { font-size: 12px; font-weight: 600; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .payroll-safety-amount { font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700; color: var(--text); margin-bottom: 4px; line-height: 1.1; }
+    .payroll-safety-headline { font-size: 14px; color: var(--text); margin-bottom: 8px; }
+    .payroll-safety-explanation { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .payroll-safety-card.no-margin { background: var(--red-dim); border-color: rgba(239,68,68,0.35); }
+    .payroll-safety-card.no-margin .payroll-safety-label { color: var(--red); }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -495,6 +504,14 @@
         <div class="insight-body ib-title"><span id="r-top-cut-label">Biggest opportunity:</span> <span id="r-top-cut-title">—</span></div>
         <div class="insight-body ib-desc" id="r-top-cut-desc">—</div>
       </div>
+    </div>
+
+    <!-- OWNER ONLY: payroll safety calculator -->
+    <div class="payroll-safety-card" id="r-payroll-safety-card" style="display:none;">
+      <div class="payroll-safety-label">💰 Payroll safety calculator</div>
+      <div class="payroll-safety-amount" id="r-payroll-safety-amount">$0</div>
+      <div class="payroll-safety-headline" id="r-payroll-safety-headline">The maximum you can safely pay in total salaries this month</div>
+      <div class="payroll-safety-explanation" id="r-payroll-safety-explanation">—</div>
     </div>
 
     <!-- FREE: the 4 key metrics — a real, complete snapshot, not a teaser -->
@@ -1559,6 +1576,23 @@
           <div class="metric-val">${m.value}</div>
           <div class="metric-trend trend-${m.type}">${m.type==='up'?'↑':m.type==='down'?'↓':'⚠'} ${m.trend}</div>
         </div>`).join('');
+    }
+
+    // OWNER ONLY: payroll safety calculator
+    const payrollSafetyCard = document.getElementById('r-payroll-safety-card');
+    if (payrollSafetyCard) {
+      if (d.payrollSafety) {
+        const ps = d.payrollSafety;
+        payrollSafetyCard.style.display = 'block';
+        payrollSafetyCard.classList.toggle('no-margin', !ps.hasSafeMargin);
+        document.getElementById('r-payroll-safety-amount').textContent = ps.maxMonthlyPayrollFormatted || '$0';
+        document.getElementById('r-payroll-safety-headline').textContent = ps.hasSafeMargin
+          ? 'The maximum you can safely pay in total salaries this month'
+          : 'No safe payroll margin right now';
+        document.getElementById('r-payroll-safety-explanation').textContent = ps.explanation || '';
+      } else {
+        payrollSafetyCard.style.display = 'none';
+      }
     }
 
     // PRO: employee pay benchmark (not applicable to public stock scans)

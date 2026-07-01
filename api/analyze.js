@@ -1,5 +1,39 @@
 export const config = { runtime: 'edge' };
 
+function parseMoney(value) {
+  const n = parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+// Deterministic payroll ceiling — not left to the AI so the dollar figure is
+// reproducible and grounded in the actual numbers, not a language-model guess.
+// Combines two independent estimates and takes the more conservative (lower) one:
+//   1. A revenue-based rule-of-thumb ratio, scaled by business health.
+//   2. A cash-flow-based ceiling: what's left after current expenses and a safety buffer.
+function computePayrollSafety(revenue, expenses, score) {
+  if (revenue == null || expenses == null || !(revenue > 0)) return null;
+
+  const payrollRatio = score >= 80 ? 0.45 : score >= 60 ? 0.38 : score >= 40 ? 0.28 : 0.18;
+  const bufferPct = score >= 80 ? 0.08 : score >= 60 ? 0.12 : score >= 40 ? 0.18 : 0.28;
+
+  const revenueBasedCeiling = revenue * payrollRatio;
+  const cashFlowCeiling = Math.max(0, revenue - expenses - (revenue * bufferPct));
+  const maxMonthlyPayroll = Math.max(0, Math.round(Math.min(revenueBasedCeiling, cashFlowCeiling) / 50) * 50);
+
+  const explanation = maxMonthlyPayroll > 0
+    ? `Based on your $${revenue.toLocaleString('en-US')} monthly revenue, $${expenses.toLocaleString('en-US')} in expenses, and a health score of ${score}/100, this keeps a ${Math.round(bufferPct * 100)}% safety buffer for slow months and unexpected costs.`
+    : `Your current expenses leave no safe margin for additional payroll right now — consider reducing costs or growing revenue before committing to new salaries.`;
+
+  return {
+    maxMonthlyPayroll,
+    maxMonthlyPayrollFormatted: `$${maxMonthlyPayroll.toLocaleString('en-US')}`,
+    payrollRatio,
+    bufferPct,
+    hasSafeMargin: maxMonthlyPayroll > 0,
+    explanation
+  };
+}
+
 export default async function handler(req) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -130,7 +164,15 @@ ${orderingRule}
 - Base numbers on the revenue, expenses, and employee count given. Be realistic, not generic.
 - Return ONLY the JSON object. No explanation, no markdown code fences.`;
 
-    return await callGroqForJson(prompt);
+    return await callGroqForJson(prompt, (parsed) => {
+      if (!parsed || typeof parsed !== 'object') return;
+      if (scanMode !== 'owner') return; // payroll safety calculator is an owner-mode feature only
+      const revenueNum = parseMoney(revenue);
+      const expensesNum = parseMoney(expenses);
+      let score = Number(parsed.score);
+      if (!Number.isFinite(score)) score = 50;
+      parsed.payrollSafety = computePayrollSafety(revenueNum, expensesNum, score);
+    });
 
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message || 'Unexpected server error' }), {
