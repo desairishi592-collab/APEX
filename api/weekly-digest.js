@@ -137,8 +137,10 @@ export default async function handler(req) {
     });
   }
 
-  const origin = new URL(req.url).origin;
+  const reqUrl = new URL(req.url);
+  const origin = reqUrl.origin;
   const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
+  const debugForceEmail = reqUrl.searchParams.get('debugForceEmail'); // TEMP: remove once live send is confirmed
 
   let users;
   try {
@@ -232,7 +234,7 @@ export default async function handler(req) {
     ];
 
     try {
-      const sent = await sendDigestEmail(resendKey, user.email, sections);
+      const sent = await sendDigestEmail(resendKey, debugForceEmail || user.email, sections); // TEMP: debugForceEmail override
       userDebug.sent = sent;
       if (sent) emailsSent++;
     } catch (e) {
