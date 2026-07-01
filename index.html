@@ -64,6 +64,7 @@
     .search-result .sr-desc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .search-result.search-empty { color: var(--muted); cursor: default; }
     .search-result.search-empty:hover { background: none; }
+    .search-dropdown-header { padding: 8px 12px 4px; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.05em; }
 
     .btn { padding: 10px 20px; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'Inter', sans-serif; transition: opacity 0.2s, transform 0.1s; }
     .btn:hover { opacity: 0.88; }
@@ -1170,23 +1171,60 @@
   // ── PUBLIC STOCK SCAN (investor mode only) ──
   // ── STOCK SEARCH AUTOCOMPLETE (shared by the primary form and the stock comparison box) ──
   const searchContexts = {}; // contextId -> { debounceTimer, abortController, results }
+  let popularStocksCache = null;
+  let popularStocksPromise = null;
 
   function getSearchContext(contextId) {
     if (!searchContexts[contextId]) searchContexts[contextId] = { debounceTimer: null, abortController: null, results: [] };
     return searchContexts[contextId];
   }
 
+  function renderSearchDropdown(dropdown, contextId, results, headerLabel) {
+    getSearchContext(contextId).results = results;
+    if (!results.length) {
+      dropdown.innerHTML = '<div class="search-result search-empty">No matches found</div>';
+      dropdown.style.display = 'block';
+      return;
+    }
+    const header = headerLabel ? `<div class="search-dropdown-header">${escapeHtml(headerLabel)}</div>` : '';
+    dropdown.innerHTML = header + results.map((r, i) => `
+      <div class="search-result" data-idx="${i}" data-ctx="${contextId}">
+        <span class="sr-symbol">${escapeHtml(r.symbol)}</span>
+        <span class="sr-desc">${escapeHtml(r.description)}</span>
+      </div>`).join('');
+    dropdown.style.display = 'block';
+  }
+
   function onStockSearchInput(query, contextId, dropdownId) {
     const ctx = getSearchContext(contextId);
-    const dropdown = document.getElementById(dropdownId);
     clearTimeout(ctx.debounceTimer);
     const q = query.trim();
     if (!q) {
-      dropdown.style.display = 'none';
-      dropdown.innerHTML = '';
+      showPopularStocks(contextId, dropdownId);
       return;
     }
     ctx.debounceTimer = setTimeout(() => fetchStockSearch(q, contextId, dropdownId), 300);
+  }
+
+  // Shown immediately when the user focuses an empty search box, before they type anything.
+  async function showPopularStocks(contextId, dropdownId) {
+    const dropdown = document.getElementById(dropdownId);
+    if (popularStocksCache) {
+      renderSearchDropdown(dropdown, contextId, popularStocksCache, 'Popular companies');
+      return;
+    }
+    if (!popularStocksPromise) {
+      popularStocksPromise = fetch('/api/search?popular=1')
+        .then(res => res.json())
+        .then(data => data.results || [])
+        .catch(() => []);
+    }
+    const results = await popularStocksPromise;
+    popularStocksCache = results;
+    // The user may have started typing while this was in flight — don't clobber a real search.
+    const input = dropdown.parentElement.querySelector('input');
+    if (input && input.value.trim()) return;
+    renderSearchDropdown(dropdown, contextId, results, 'Popular companies');
   }
 
   async function fetchStockSearch(q, contextId, dropdownId) {
@@ -1197,18 +1235,7 @@
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctx.abortController.signal });
       const data = await res.json();
-      ctx.results = data.results || [];
-      if (!ctx.results.length) {
-        dropdown.innerHTML = '<div class="search-result search-empty">No matches found</div>';
-        dropdown.style.display = 'block';
-        return;
-      }
-      dropdown.innerHTML = ctx.results.map((r, i) => `
-        <div class="search-result" data-idx="${i}" data-ctx="${contextId}">
-          <span class="sr-symbol">${escapeHtml(r.symbol)}</span>
-          <span class="sr-desc">${escapeHtml(r.description)}</span>
-        </div>`).join('');
-      dropdown.style.display = 'block';
+      renderSearchDropdown(dropdown, contextId, data.results || []);
     } catch (e) {
       if (e.name !== 'AbortError') dropdown.style.display = 'none';
     }
