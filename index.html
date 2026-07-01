@@ -200,6 +200,7 @@
     .action-row { display: flex; gap: 10px; }
     .btn-outline { flex: 1; padding: 11px; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text); cursor: pointer; font-family: 'Inter', sans-serif; transition: border-color 0.15s; }
     .btn-outline:hover { border-color: var(--border-hover); }
+    .btn-outline.saved { border-color: var(--green); color: var(--green); }
 
     .locked-section { position: relative; }
     .locked-section .lock-overlay {
@@ -316,7 +317,7 @@
 <!-- AUTH MODAL -->
 <div class="auth-overlay" id="auth-overlay">
   <div class="auth-modal">
-    <button class="auth-close" onclick="pendingScanAfterAuth = false; closeAuth();">✕</button>
+    <button class="auth-close" onclick="pendingScanAfterAuth = false; pendingWatchlistSave = false; closeAuth();">✕</button>
     <div id="auth-form-view">
       <h2 id="auth-title">Log in to APEX</h2>
       <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
@@ -378,6 +379,7 @@
       <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:block;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
       <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">Scan history</button>
     </div>
+    <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openWatchlist()" id="am-watchlist-btn">My Watchlist</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
     <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
       <span style="font-size:11px; color: var(--dim);">Dev: preview Pro view</span>
@@ -394,6 +396,18 @@
     <div class="history-sub">Your past business health scans.</div>
     <div class="history-list" id="history-list">
       <div class="history-loading">Loading scans…</div>
+    </div>
+  </div>
+</div>
+
+<!-- WATCHLIST MODAL -->
+<div class="auth-overlay" id="watchlist-overlay">
+  <div class="history-modal">
+    <button class="auth-close" onclick="closeWatchlist()">✕</button>
+    <h2>My Watchlist</h2>
+    <div class="history-sub">Public stocks you've saved to track.</div>
+    <div class="history-list" id="watchlist-list">
+      <div class="history-loading">Loading watchlist…</div>
     </div>
   </div>
 </div>
@@ -636,6 +650,7 @@
     </div>
 
     <div class="action-row" style="margin-bottom: 1.25rem;">
+      <button class="btn-outline" id="r-watchlist-btn" style="display:none;" onclick="saveToWatchlist()">☆ Save to Watchlist</button>
       <button class="btn-outline" onclick="exportPdf()">⬇ Export PDF report</button>
     </div>
 
@@ -665,6 +680,7 @@
   let lastScanLimitHitAt = null;
   let scanMode = 'owner'; // 'owner' | 'investor'
   let pendingScanAfterAuth = false;
+  let pendingWatchlistSave = false;
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
@@ -915,6 +931,13 @@
           runScan();
         }
       }
+
+      // If they tried to save a stock to their watchlist before they were logged in,
+      // finish that save now instead of making them click the button again.
+      if (pendingWatchlistSave) {
+        pendingWatchlistSave = false;
+        saveToWatchlist();
+      }
     } catch (e) {
       let msg = 'Something went wrong. Please try again.';
       if (e && typeof e.message === 'string' && e.message.trim()) {
@@ -1055,6 +1078,107 @@
       }).join('');
     } catch (e) {
       listEl.innerHTML = '<div class="history-empty">Couldn\'t load scan history. Please try again.</div>';
+    }
+  }
+
+  // ── WATCHLIST ──
+  async function saveToWatchlist() {
+    if (!currentUser) {
+      pendingWatchlistSave = true;
+      openAuth('signup');
+      return;
+    }
+    if (!currentStockTicker || !scanData || !scanData.isPublicStock) return;
+
+    const btn = document.getElementById('r-watchlist-btn');
+    const sa = scanData.stockAnalysis || {};
+
+    try {
+      const { error } = await sb.from('watchlist').upsert({
+        user_id: currentUser.id,
+        ticker: currentStockTicker,
+        company_name: currentScanBizName || currentStockTicker,
+        score: scanData.score ?? null,
+        safety_score: sa.safetyScore ?? null,
+        signal: sa.signal || null
+      }, { onConflict: 'user_id,ticker' });
+
+      if (error) throw error;
+
+      if (btn) {
+        btn.textContent = '✓ Saved to Watchlist';
+        btn.classList.add('saved');
+      }
+    } catch (e) {
+      if (btn) {
+        btn.textContent = 'Could not save — try again';
+      }
+    }
+  }
+
+  function openWatchlist() {
+    closeAccount();
+    document.getElementById('watchlist-overlay').classList.add('active');
+    loadWatchlist();
+  }
+
+  function closeWatchlist() {
+    document.getElementById('watchlist-overlay').classList.remove('active');
+  }
+
+  async function loadWatchlist() {
+    const listEl = document.getElementById('watchlist-list');
+    listEl.innerHTML = '<div class="history-loading">Loading watchlist…</div>';
+
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your watchlist.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('watchlist')
+        .select('ticker, company_name, safety_score, signal, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        listEl.innerHTML = '<div class="history-empty">No saved stocks yet — scan a public stock and tap "Save to Watchlist" to track it here.</div>';
+        return;
+      }
+
+      listEl.innerHTML = data.map(w => {
+        const score = w.safety_score ?? 0;
+        const scoreClass = score >= 66 ? 'hs-good' : score >= 41 ? 'hs-warn' : 'hs-bad';
+        const signalLower = (w.signal || '').toLowerCase();
+        const signalClass = signalLower === 'buy' ? 'buy' : signalLower === 'sell' ? 'sell' : 'hold';
+        const ticker = escapeHtml(w.ticker || '');
+        const companyName = escapeHtml(w.company_name || w.ticker || '');
+        return `
+          <div class="history-item">
+            <div class="history-score ${scoreClass}">${score}</div>
+            <div class="history-info">
+              <div class="history-biz">${ticker}</div>
+              <div class="history-meta">${companyName}</div>
+            </div>
+            <span class="signal-badge ${signalClass}">${escapeHtml(w.signal || '—')}</span>
+            <button class="auth-close" style="position:static; font-size:14px;" onclick="event.stopPropagation(); removeFromWatchlist('${ticker.replace(/'/g, "\\'")}')" title="Remove">✕</button>
+          </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your watchlist. Please try again.</div>';
+    }
+  }
+
+  async function removeFromWatchlist(ticker) {
+    if (!currentUser) return;
+    try {
+      await sb.from('watchlist').delete().eq('user_id', currentUser.id).eq('ticker', ticker);
+      loadWatchlist();
+    } catch (e) {
+      // Non-fatal: leave the list as-is, user can retry
     }
   }
 
@@ -1798,6 +1922,18 @@
         document.getElementById('compare-result-area').innerHTML = '';
       } else {
         compareCard.style.display = 'none';
+      }
+    }
+
+    // STOCK ONLY: save to watchlist — reset button state for each new scan
+    const watchlistBtn = document.getElementById('r-watchlist-btn');
+    if (watchlistBtn) {
+      if (d.isPublicStock) {
+        watchlistBtn.style.display = 'block';
+        watchlistBtn.textContent = '☆ Save to Watchlist';
+        watchlistBtn.classList.remove('saved');
+      } else {
+        watchlistBtn.style.display = 'none';
       }
     }
 
