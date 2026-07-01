@@ -305,22 +305,21 @@ async function handleStockAnalysis(ticker, companyName) {
     });
   }
 
-  // Fetch real data from Finnhub in parallel — quote, company profile, financials, and insider activity
-  let quote = null, profile = null, financials = null, metrics = null, insiderTx = null;
+  // Fetch real data from Finnhub in parallel — quote, company profile, metrics, and insider activity
+  // (financials/reported was fetched here previously but never used — dropped to cut Finnhub call volume)
+  let quote = null, profile = null, metrics = null, insiderTx = null;
 
   try {
-    const [quoteRes, profileRes, financialsRes, metricsRes, insiderRes] = await Promise.all([
+    const [quoteRes, profileRes, metricsRes, insiderRes] = await Promise.all([
       fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`),
       fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${finnhubKey}`),
-      fetch(`https://finnhub.io/api/v1/financials/reported?symbol=${symbol}&freq=annual&token=${finnhubKey}`),
       fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${finnhubKey}`),
       fetch(`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${symbol}&token=${finnhubKey}`)
     ]);
 
-    [quote, profile, financials, metrics, insiderTx] = await Promise.all([
+    [quote, profile, metrics, insiderTx] = await Promise.all([
       quoteRes.ok ? quoteRes.json() : null,
       profileRes.ok ? profileRes.json() : null,
-      financialsRes.ok ? financialsRes.json() : null,
       metricsRes.ok ? metricsRes.json() : null,
       insiderRes.ok ? insiderRes.json() : null
     ]);
@@ -382,32 +381,51 @@ async function handleStockAnalysis(ticker, companyName) {
   const priceNote = livePrice ? 'live' : prevClose ? 'previous close' : priceFromCap ? 'estimated from market cap' : 'unavailable';
   const priceChange = quote?.dp ? `${quote.dp.toFixed(2)}%` : 'Unknown';
 
-  // Key financial metrics from Finnhub — using correct field names
+  // Key financial metrics from Finnhub — with fallback field names, since Finnhub doesn't
+  // consistently populate the same variant (TTM vs Annual vs Quarterly) for every ticker.
+  // Using nullish coalescing (not ||) so a legitimate value of 0 isn't mistaken for "missing".
   const m = metrics?.metric || {};
-  const peRatio = m['peNormalizedAnnual'] ? m['peNormalizedAnnual'].toFixed(1) : 'Unknown';
-  const eps = m['epsNormalizedAnnual'] ? `$${m['epsNormalizedAnnual'].toFixed(2)}` : 'Unknown';
+  const nz = (...keys) => {
+    for (const k of keys) {
+      const v = m[k];
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    }
+    return null;
+  };
+
+  const peRaw = nz('peNormalizedAnnual', 'peTTM', 'peBasicExclExtraTTM', 'peExclExtraAnnual', 'peInclExtraTTM');
+  const peRatio = peRaw != null ? peRaw.toFixed(1) : 'Unknown';
+  const epsRaw = nz('epsNormalizedAnnual', 'epsTTM', 'epsInclExtraItemsTTM', 'epsExclExtraItemsAnnual');
+  const eps = epsRaw != null ? `$${epsRaw.toFixed(2)}` : 'Unknown';
   // Revenue growth from Finnhub free tier is unreliable — use EPS and price return instead
   const revenueGrowth = 'N/A (see EPS trend below)';
-  const yearReturn = m['52WeekPriceReturnDaily'] ? `${m['52WeekPriceReturnDaily'].toFixed(1)}%` : 'Unknown';
-  const profitMargin = m['netProfitMarginAnnual'] ? `${m['netProfitMarginAnnual'].toFixed(1)}%` : 'Unknown';
-  const debtEquity = m['totalDebt/totalEquityAnnual'] ? m['totalDebt/totalEquityAnnual'].toFixed(2) : 'Unknown';
-  // ROE: Finnhub uses 'roeTTM' as the primary field name
-  const roeRaw = m['roeTTM'] || m['roeAnnual'] || m['roeRateAnnual'] || null;
-  const roe = roeRaw ? `${roeRaw.toFixed(1)}%` : 'Unknown';
-  const currentRatio = m['currentRatioAnnual'] ? m['currentRatioAnnual'].toFixed(2) : 'Unknown';
-  const beta = m['beta'] ? m['beta'].toFixed(2) : 'Unknown';
-  const high52Raw = m['52WeekHigh'] || null;
-  const low52Raw = m['52WeekLow'] || null;
-  const high52 = high52Raw ? `$${high52Raw.toFixed(2)}` : 'Unknown';
-  const low52 = low52Raw ? `$${low52Raw.toFixed(2)}` : 'Unknown';
+  const yearReturnRaw = nz('52WeekPriceReturnDaily');
+  const yearReturn = yearReturnRaw != null ? `${yearReturnRaw.toFixed(1)}%` : 'Unknown';
+  const profitMarginRaw = nz('netProfitMarginAnnual', 'netProfitMarginTTM', 'pretaxMarginAnnual', 'pretaxMarginTTM');
+  const profitMargin = profitMarginRaw != null ? `${profitMarginRaw.toFixed(1)}%` : 'Unknown';
+  const debtEquityRaw = nz('totalDebt/totalEquityAnnual', 'totalDebt/totalEquityQuarterly', 'longtermDebt/equityAnnual', 'longtermDebt/equityQuarterly');
+  const debtEquity = debtEquityRaw != null ? debtEquityRaw.toFixed(2) : 'Unknown';
+  // ROE: Finnhub's field name for this varies by plan/ticker
+  const roeRaw = nz('roeTTM', 'roeRfy', 'roeAnnual', 'roe5Y');
+  const roe = roeRaw != null ? `${roeRaw.toFixed(1)}%` : 'Unknown';
+  const currentRatioRaw = nz('currentRatioAnnual', 'currentRatioQuarterly');
+  const currentRatio = currentRatioRaw != null ? currentRatioRaw.toFixed(2) : 'Unknown';
+  const betaRaw = nz('beta');
+  const beta = betaRaw != null ? betaRaw.toFixed(2) : 'Unknown';
+  const high52Raw = nz('52WeekHigh');
+  const low52Raw = nz('52WeekLow');
+  const high52 = high52Raw != null ? `$${high52Raw.toFixed(2)}` : 'Unknown';
+  const low52 = low52Raw != null ? `$${low52Raw.toFixed(2)}` : 'Unknown';
 
   // Valuation multiples — pulled from the same metrics endpoint, no extra API call needed
-  const pbRatio = m['pbAnnual'] ? m['pbAnnual'].toFixed(2) : 'Unknown';
-  const psRatio = m['psAnnual'] ? m['psAnnual'].toFixed(2) : 'Unknown';
+  const pbRaw = nz('pbAnnual', 'pbQuarterly');
+  const pbRatio = pbRaw != null ? pbRaw.toFixed(2) : 'Unknown';
+  const psRaw = nz('psAnnual', 'psTTM', 'psQuarterly');
+  const psRatio = psRaw != null ? psRaw.toFixed(2) : 'Unknown';
 
   // Dividend data — pulled from the same metrics endpoint, no extra API call needed
-  const dividendYieldRaw = m['dividendYieldIndicatedAnnual'] || m['currentDividendYieldTTM'] || null;
-  const dividendPerShareRaw = m['dividendPerShareAnnual'] || null;
+  const dividendYieldRaw = nz('dividendYieldIndicatedAnnual', 'currentDividendYieldTTM');
+  const dividendPerShareRaw = nz('dividendPerShareAnnual');
   const paysDividend = !!(dividendYieldRaw || dividendPerShareRaw);
   const dividendYield = dividendYieldRaw ? `${dividendYieldRaw.toFixed(2)}%` : 'None';
   const dividendPerShare = dividendPerShareRaw ? `$${dividendPerShareRaw.toFixed(2)}` : 'None';
@@ -564,6 +582,7 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
 Rules:
 - Be sector-calibrated. A well-known S&P 500 company with strong margins and positive EPS should NOT score below 60 without genuinely serious risk factors.
 - Use the actual numbers provided — do not invent figures.
+- CRITICAL: Do NOT default to a "safe middle" score (e.g. always landing near 65-75) regardless of the company. Actually weigh the specific numbers given: a company with negative profit margin, a deeply negative 52-week return, or a negative P/E is in real distress and should score well below 50 — potentially below 30 if multiple signals are bad. A company with strong margins, positive ROE, reasonable debt, and a healthy price trend should score 75+. Two different companies with different numbers should virtually never land on the same score — if your instinct is to give a similar score to what you'd give a very different company, re-examine the specific numbers above and adjust.
 - "stockAnalysis.safetyScore" is independent from the top-level "score" — a company can have a healthy business (high "score") but an unattractive stock price (low "safetyScore") if it looks overvalued, and vice versa.
 - If there is no recent insider activity, say so plainly rather than speculating.
 - Return ONLY the JSON object.`;
@@ -571,6 +590,18 @@ Rules:
   return await callGroqForJson(prompt, (parsed) => {
     if (!parsed || typeof parsed !== 'object') return;
     clampIndustryPercentiles(parsed);
+
+    // Deterministic ceiling on the top-level score: real distress signals cap it regardless
+    // of what the AI says, so an objectively struggling company can't cluster with a healthy one.
+    let score = Number(parsed.score);
+    if (!Number.isFinite(score)) score = 50;
+    let scoreCeiling = 100;
+    if (yearReturnRaw != null && yearReturnRaw <= -50) scoreCeiling = Math.min(scoreCeiling, 30);
+    else if (yearReturnRaw != null && yearReturnRaw <= -25) scoreCeiling = Math.min(scoreCeiling, 50);
+    if (profitMarginRaw != null && profitMarginRaw < 0) scoreCeiling = Math.min(scoreCeiling, 40);
+    if (peRaw != null && peRaw < 0) scoreCeiling = Math.min(scoreCeiling, 45); // negative P/E = losing money
+    parsed.score = Math.max(0, Math.min(100, Math.round(Math.min(score, scoreCeiling))));
+
     // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
     if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
       const topColor = parsed.costCuts?.[0]?.color;
