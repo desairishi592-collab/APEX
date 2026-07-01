@@ -317,7 +317,7 @@
 <!-- AUTH MODAL -->
 <div class="auth-overlay" id="auth-overlay">
   <div class="auth-modal">
-    <button class="auth-close" onclick="pendingScanAfterAuth = false; pendingWatchlistSave = false; closeAuth();">✕</button>
+    <button class="auth-close" onclick="pendingScanAfterAuth = false; pendingWatchlistSave = false; pendingPriceAlertSave = false; closeAuth();">✕</button>
     <div id="auth-form-view">
       <h2 id="auth-title">Log in to APEX</h2>
       <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
@@ -380,6 +380,7 @@
       <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">My Scan History</button>
     </div>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openWatchlist()" id="am-watchlist-btn">My Watchlist</button>
+    <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openAlerts()" id="am-alerts-btn">My Alerts</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
     <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
       <span style="font-size:11px; color: var(--dim);">Dev: preview Pro view</span>
@@ -408,6 +409,18 @@
     <div class="history-sub">Public stocks you've saved to track.</div>
     <div class="history-list" id="watchlist-list">
       <div class="history-loading">Loading watchlist…</div>
+    </div>
+  </div>
+</div>
+
+<!-- PRICE ALERTS MODAL -->
+<div class="auth-overlay" id="alerts-overlay">
+  <div class="history-modal">
+    <button class="auth-close" onclick="closeAlerts()">✕</button>
+    <h2>My Alerts</h2>
+    <div class="history-sub">Price targets you're waiting for.</div>
+    <div class="history-list" id="alerts-list">
+      <div class="history-loading">Loading alerts…</div>
     </div>
   </div>
 </div>
@@ -546,6 +559,26 @@
       </div>
     </div>
 
+    <!-- STOCK ONLY: price alert, shown when the signal is Hold or Sell ("wait for it" to become a buy) -->
+    <div class="dive-card" id="r-price-alert-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Wait for it</div>
+        <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">This isn't a great entry point right now. Set a target price and we'll email you when it gets there.</p>
+        <button class="btn-outline" id="price-alert-cta-btn" style="width:100%;" onclick="showPriceAlertForm()">🔔 Alert me when to buy</button>
+        <div id="price-alert-form-area" style="display:none;">
+          <div class="biz-grid" style="grid-template-columns: 1fr; margin-bottom:10px;">
+            <input type="number" id="price-alert-target" placeholder="Target price ($)" step="0.01" min="0" />
+          </div>
+          <div class="action-row">
+            <button class="btn-outline" onclick="hidePriceAlertForm()">Cancel</button>
+            <button class="btn btn-accent" style="flex:1;" onclick="savePriceAlert()">Set Alert</button>
+          </div>
+          <div class="err" id="price-alert-err" style="display:none; margin-top:10px;"></div>
+        </div>
+        <div id="price-alert-confirmed" style="display:none; color:var(--green); font-size:13px; margin-top:8px;"></div>
+      </div>
+    </div>
+
     <!-- FREE: "fix this first" headline, always visible — wording depends on mode -->
     <div class="card fix-first-card" id="r-top-cut">
       <div class="insight-ico ico-warn" id="r-top-cut-ico">🎯</div>
@@ -681,6 +714,7 @@
   let scanMode = 'owner'; // 'owner' | 'investor'
   let pendingScanAfterAuth = false;
   let pendingWatchlistSave = false;
+  let pendingPriceAlertSave = false;
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
@@ -937,6 +971,12 @@
       if (pendingWatchlistSave) {
         pendingWatchlistSave = false;
         saveToWatchlist();
+      }
+
+      // Same idea for a price alert they tried to set before logging in.
+      if (pendingPriceAlertSave) {
+        pendingPriceAlertSave = false;
+        showPriceAlertForm();
       }
     } catch (e) {
       let msg = 'Something went wrong. Please try again.';
@@ -1195,6 +1235,149 @@
     try {
       await sb.from('watchlist').delete().eq('user_id', currentUser.id).eq('ticker', ticker);
       loadWatchlist();
+    } catch (e) {
+      // Non-fatal: leave the list as-is, user can retry
+    }
+  }
+
+  // ── PRICE ALERTS ("Wait for it") ──
+  function showPriceAlertForm() {
+    if (!currentUser) {
+      pendingPriceAlertSave = true;
+      openAuth('signup');
+      return;
+    }
+    document.getElementById('price-alert-cta-btn').style.display = 'none';
+    document.getElementById('price-alert-form-area').style.display = 'block';
+    document.getElementById('price-alert-confirmed').style.display = 'none';
+    document.getElementById('price-alert-err').style.display = 'none';
+
+    // Pre-fill a sensible default target: ~10% below the current price
+    const input = document.getElementById('price-alert-target');
+    if (!input.value) {
+      const currentPriceNum = getCurrentStockPriceNumber();
+      if (currentPriceNum) input.value = (currentPriceNum * 0.9).toFixed(2);
+    }
+  }
+
+  function hidePriceAlertForm() {
+    document.getElementById('price-alert-form-area').style.display = 'none';
+    document.getElementById('price-alert-cta-btn').style.display = 'block';
+  }
+
+  function getCurrentStockPriceNumber() {
+    const priceMetric = (scanData && scanData.metrics || []).find(m => m.label === 'Current Price');
+    if (!priceMetric) return null;
+    const n = parseFloat(String(priceMetric.value).replace(/[^0-9.]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  async function savePriceAlert() {
+    const errEl = document.getElementById('price-alert-err');
+    errEl.style.display = 'none';
+
+    if (!currentUser) {
+      pendingPriceAlertSave = true;
+      openAuth('signup');
+      return;
+    }
+    if (!currentStockTicker || !scanData || !scanData.isPublicStock) return;
+
+    const targetInput = document.getElementById('price-alert-target');
+    const targetPrice = parseFloat(targetInput.value);
+    if (!targetPrice || targetPrice <= 0) {
+      errEl.textContent = 'Please enter a valid target price.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const sa = scanData.stockAnalysis || {};
+
+    try {
+      const { error } = await sb.from('price_alerts').insert({
+        user_id: currentUser.id,
+        email: currentUser.email,
+        ticker: currentStockTicker,
+        company_name: currentScanBizName || currentStockTicker,
+        target_price: targetPrice,
+        price_at_creation: getCurrentStockPriceNumber(),
+        signal_at_creation: sa.signal || null
+      });
+      if (error) throw error;
+
+      document.getElementById('price-alert-form-area').style.display = 'none';
+      const confirmEl = document.getElementById('price-alert-confirmed');
+      confirmEl.textContent = `✓ Alert set at $${targetPrice.toFixed(2)} — we'll email you when it hits your target.`;
+      confirmEl.style.display = 'block';
+    } catch (e) {
+      errEl.textContent = 'Could not set alert — please try again.';
+      errEl.style.display = 'block';
+    }
+  }
+
+  function openAlerts() {
+    closeAccount();
+    document.getElementById('alerts-overlay').classList.add('active');
+    loadAlerts();
+  }
+
+  function closeAlerts() {
+    document.getElementById('alerts-overlay').classList.remove('active');
+  }
+
+  async function loadAlerts() {
+    const listEl = document.getElementById('alerts-list');
+    listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
+
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your price alerts.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('price_alerts')
+        .select('id, ticker, company_name, target_price, status, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        listEl.innerHTML = '<div class="history-empty">No alerts yet — scan a public stock and tap "Alert me when to buy" to set one.</div>';
+        return;
+      }
+
+      listEl.innerHTML = data.map(a => {
+        const statusLabel = a.status === 'triggered' ? 'Triggered' : a.status === 'cancelled' ? 'Cancelled' : 'Active';
+        const statusClass = a.status === 'triggered' ? 'buy' : a.status === 'cancelled' ? 'nodata' : 'hold';
+        const date = new Date(a.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const ticker = escapeHtml(a.ticker || '');
+        const companyName = escapeHtml(a.company_name || a.ticker || '');
+        const cancelBtn = a.status === 'active'
+          ? `<button class="auth-close" style="position:static; font-size:14px;" onclick="event.stopPropagation(); cancelAlert('${a.id}')" title="Cancel">✕</button>`
+          : '';
+        return `
+          <div class="history-item" style="cursor:default;">
+            <div class="history-info">
+              <div class="history-biz">${ticker} — target $${Number(a.target_price).toFixed(2)}</div>
+              <div class="history-meta">${companyName} · set ${date}</div>
+            </div>
+            <span class="signal-badge ${statusClass}">${statusLabel}</span>
+            ${cancelBtn}
+          </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your alerts. Please try again.</div>';
+    }
+  }
+
+  async function cancelAlert(id) {
+    if (!currentUser) return;
+    try {
+      await sb.from('price_alerts').update({ status: 'cancelled' }).eq('id', id).eq('user_id', currentUser.id);
+      loadAlerts();
     } catch (e) {
       // Non-fatal: leave the list as-is, user can retry
     }
@@ -1952,6 +2135,22 @@
         watchlistBtn.classList.remove('saved');
       } else {
         watchlistBtn.style.display = 'none';
+      }
+    }
+
+    // STOCK ONLY: "Wait for it" price alert — only when the signal says this isn't a good entry point
+    const priceAlertCard = document.getElementById('r-price-alert-card');
+    if (priceAlertCard) {
+      const signal = (d.stockAnalysis && d.stockAnalysis.signal || '').toLowerCase();
+      if (d.isPublicStock && (signal === 'hold' || signal === 'sell')) {
+        priceAlertCard.style.display = 'block';
+        document.getElementById('price-alert-cta-btn').style.display = 'block';
+        document.getElementById('price-alert-form-area').style.display = 'none';
+        document.getElementById('price-alert-target').value = '';
+        document.getElementById('price-alert-err').style.display = 'none';
+        document.getElementById('price-alert-confirmed').style.display = 'none';
+      } else {
+        priceAlertCard.style.display = 'none';
       }
     }
 

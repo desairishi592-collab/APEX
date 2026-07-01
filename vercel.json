@@ -1,5 +1,8 @@
 {
   "rewrites": [
     { "source": "/api/analyze", "destination": "/api/analyze.js" }
+  ],
+  "crons": [
+    { "path": "/api/check-price-alerts", "schedule": "0 14 * * *" }
   ]
 }
