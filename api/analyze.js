@@ -317,7 +317,13 @@ async function callGroqForJson(prompt, postProcess) {
     } catch {
       errText = `HTTP ${groqRes.status}`;
     }
-    return new Response(JSON.stringify({ error: 'AI analysis failed', detail: errText }), {
+    // A 429 here means our Groq account is temporarily out of capacity (e.g. the daily
+    // token quota), not that the scan itself is broken — surface that distinction instead
+    // of a generic failure so it isn't mistaken for a code bug on retry.
+    const message = groqRes.status === 429
+      ? 'Our AI analysis provider is temporarily at capacity — please try again in a few minutes.'
+      : 'AI analysis failed';
+    return new Response(JSON.stringify({ error: message, detail: errText }), {
       status: 502,
       headers: { 'Content-Type': 'application/json' }
     });
