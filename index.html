@@ -105,14 +105,15 @@
     .score-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1; }
     .score-num { font-family: 'Space Grotesk', sans-serif; font-size: 26px; font-weight: 600; color: var(--text); line-height: 1; }
     .score-denom { font-size: 11px; color: var(--muted); }
-    .score-detail h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; margin-bottom: 6px; }
-    .score-detail p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .score-detail { min-width: 0; flex: 1; }
+    .score-detail h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; font-weight: 600; margin-bottom: 6px; overflow-wrap: break-word; word-break: break-word; }
+    .score-detail p { font-size: 13px; color: var(--muted); line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
     .score-badge { display: inline-block; margin-top: 10px; font-size: 11px; padding: 4px 10px; border-radius: 20px; background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-glow); }
 
     .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 1.25rem; }
     .metric { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.125rem 1rem; }
     .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
-    .metric-val { font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .metric-val { font-family: 'Space Grotesk', sans-serif; font-size: 22px; font-weight: 600; color: var(--text); margin-bottom: 4px; overflow-wrap: break-word; word-break: break-word; }
     .metric-trend { font-size: 12px; display: flex; align-items: center; gap: 4px; }
     .trend-up { color: var(--green); } .trend-down { color: var(--red); } .trend-warn { color: var(--amber); }
 
@@ -122,25 +123,25 @@
     .insight-item:last-child { border-bottom: none; }
     .insight-ico { width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; }
     .ico-danger { background: var(--red-dim); } .ico-warn { background: var(--amber-dim); } .ico-good { background: var(--green-dim); }
-    .insight-body .ib-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 3px; }
-    .insight-body .ib-desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .insight-body.ib-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 3px; overflow-wrap: break-word; word-break: break-word; }
+    .insight-body.ib-desc { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
 
     .dive-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 1.25rem; }
     .dive-tabs { display: flex; border-bottom: 1px solid var(--border); }
     .dive-tab { padding: 10px 16px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.15s; font-family: 'Inter', sans-serif; }
     .dive-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .dive-body { padding: 1rem; }
-    .dive-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .dive-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 16px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .dive-row:last-child { border-bottom: none; }
-    .dr-label { color: var(--muted); } .dr-val { font-weight: 500; color: var(--text); }
+    .dr-label { color: var(--muted); } .dr-val { font-weight: 500; color: var(--text); overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
     .dr-val.red { color: var(--red); } .dr-val.grn { color: var(--green); } .dr-val.amb { color: var(--amber); }
 
     /* STOCK ANALYSIS */
     .dive-row-block { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .dive-row-block:last-child { border-bottom: none; }
-    .drb-head { display: flex; justify-content: space-between; align-items: center; }
-    .drb-detail { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 4px; }
-    .signal-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .drb-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+    .drb-detail { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 4px; overflow-wrap: break-word; word-break: break-word; }
+    .signal-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.03em; max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
     .signal-badge.buy { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
     .signal-badge.hold { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
     .signal-badge.sell { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
@@ -148,35 +149,37 @@
     .signal-badge.nodata { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
 
     /* STOCK COMPARISON */
-    .compare-winner-banner { background: var(--accent-dim); border: 1px solid var(--accent-glow); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; font-size: 13px; }
+    .compare-winner-banner { background: var(--accent-dim); border: 1px solid var(--accent-glow); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; font-size: 13px; overflow-wrap: break-word; word-break: break-word; }
     .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
     .compare-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; }
     .compare-col.winner { border-color: var(--green); }
-    .compare-col-title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .compare-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; gap: 8px; }
+    .compare-col-title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; }
+    .compare-col-title span:first-child { overflow-wrap: break-word; word-break: break-word; min-width: 0; }
+    .compare-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; gap: 4px 8px; }
     .compare-row:last-child { border-bottom: none; }
     .compare-row .cr-label { color: var(--muted); }
-    .compare-row .cr-val { font-weight: 500; color: var(--text); text-align: right; }
+    .compare-row .cr-val { font-weight: 500; color: var(--text); text-align: right; overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
 
     /* PAYROLL SAFETY CALCULATOR */
     .payroll-safety-card { background: var(--green-dim); border: 1px solid rgba(34,197,94,0.35); border-radius: var(--radius); padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
     .payroll-safety-label { font-size: 12px; font-weight: 600; color: var(--green); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
     .payroll-safety-amount { font-family: 'Space Grotesk', sans-serif; font-size: 32px; font-weight: 700; color: var(--text); margin-bottom: 4px; line-height: 1.1; }
-    .payroll-safety-headline { font-size: 14px; color: var(--text); margin-bottom: 8px; }
-    .payroll-safety-explanation { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .payroll-safety-headline { font-size: 14px; color: var(--text); margin-bottom: 8px; overflow-wrap: break-word; word-break: break-word; }
+    .payroll-safety-explanation { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
     .payroll-safety-card.no-margin { background: var(--red-dim); border-color: rgba(239,68,68,0.35); }
     .payroll-safety-card.no-margin .payroll-safety-label { color: var(--red); }
 
     /* FIX THIS FIRST CALLOUT */
     .fix-first-card { background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.4); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display: flex; gap: 12px; align-items: flex-start; }
     .fix-first-card .insight-ico { background: rgba(245,158,11,0.3); }
-    .fix-impact-badge { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 12px; background: rgba(245,158,11,0.2); color: var(--amber); vertical-align: middle; white-space: nowrap; }
+    .fix-first-content { min-width: 0; flex: 1; }
+    .fix-impact-badge { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 12px; background: rgba(245,158,11,0.2); color: var(--amber); vertical-align: middle; max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
 
     /* INDUSTRY PERCENTILE COMPARISON */
     .percentile-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
     .percentile-row:last-child { border-bottom: none; }
-    .percentile-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; font-size: 13px; }
-    .percentile-metric { color: var(--text); font-weight: 500; }
+    .percentile-row-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 6px; font-size: 13px; }
+    .percentile-metric { color: var(--text); font-weight: 500; overflow-wrap: break-word; word-break: break-word; min-width: 0; }
     .percentile-value { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
     .percentile-value.grn { color: var(--green); }
     .percentile-value.amb { color: var(--amber); }
@@ -186,7 +189,7 @@
     .percentile-bar-fill.grn { background: var(--green); }
     .percentile-bar-fill.amb { background: var(--amber); }
     .percentile-bar-fill.red { background: var(--red); }
-    .percentile-summary { font-size: 12px; color: var(--muted); line-height: 1.5; }
+    .percentile-summary { font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: break-word; word-break: break-word; }
 
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
@@ -521,7 +524,7 @@
     <!-- FREE: "fix this first" headline, always visible — wording depends on mode -->
     <div class="card fix-first-card" id="r-top-cut">
       <div class="insight-ico ico-warn" id="r-top-cut-ico">🎯</div>
-      <div>
+      <div class="fix-first-content">
         <div class="insight-body ib-title">
           <span id="r-top-cut-label">Fix this first:</span> <span id="r-top-cut-title">—</span>
           <span class="fix-impact-badge" id="r-top-cut-impact" style="display:none;"></span>
