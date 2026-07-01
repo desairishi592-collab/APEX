@@ -167,6 +167,11 @@
     .payroll-safety-card.no-margin { background: var(--red-dim); border-color: rgba(239,68,68,0.35); }
     .payroll-safety-card.no-margin .payroll-safety-label { color: var(--red); }
 
+    /* FIX THIS FIRST CALLOUT */
+    .fix-first-card { background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.4); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display: flex; gap: 12px; align-items: flex-start; }
+    .fix-first-card .insight-ico { background: rgba(245,158,11,0.3); }
+    .fix-impact-badge { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 12px; background: rgba(245,158,11,0.2); color: var(--amber); vertical-align: middle; white-space: nowrap; }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -497,11 +502,14 @@
       </div>
     </div>
 
-    <!-- FREE: top headline, always visible — wording depends on mode -->
-    <div class="card" id="r-top-cut" style="background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display:flex; gap:12px; align-items:flex-start;">
-      <div class="insight-ico ico-warn" id="r-top-cut-ico">✂️</div>
+    <!-- FREE: "fix this first" headline, always visible — wording depends on mode -->
+    <div class="card fix-first-card" id="r-top-cut">
+      <div class="insight-ico ico-warn" id="r-top-cut-ico">🎯</div>
       <div>
-        <div class="insight-body ib-title"><span id="r-top-cut-label">Biggest opportunity:</span> <span id="r-top-cut-title">—</span></div>
+        <div class="insight-body ib-title">
+          <span id="r-top-cut-label">Fix this first:</span> <span id="r-top-cut-title">—</span>
+          <span class="fix-impact-badge" id="r-top-cut-impact" style="display:none;"></span>
+        </div>
         <div class="insight-body ib-desc" id="r-top-cut-desc">—</div>
       </div>
     </div>
@@ -653,7 +661,7 @@
       bizLabel: "Tell APEX about your business",
       runBtn: "Run health scan →",
       resultsTitle: "Health report",
-      topCutLabel: "Biggest opportunity:",
+      topCutLabel: "Fix this first:",
       payTitle: "Employee pay benchmark",
       cutTitle: "Full cost-cutting plan",
       pwTitle: "Unlock your full report",
@@ -674,7 +682,7 @@
       bizLabel: "Tell APEX about the business you're evaluating",
       runBtn: "Run safety scan →",
       resultsTitle: "Investment safety report",
-      topCutLabel: "Biggest red flag:",
+      topCutLabel: "Biggest score driver:",
       payTitle: "Employee pay vs. industry",
       cutTitle: "Full risk breakdown",
       pwTitle: "Unlock the full risk analysis",
@@ -1541,7 +1549,7 @@
 
     document.getElementById('results-title').textContent = c.resultsTitle;
     document.getElementById('r-top-cut-label').textContent = c.topCutLabel;
-    document.getElementById('r-top-cut-ico').textContent = scanMode === 'investor' ? '🚩' : '✂️';
+    document.getElementById('r-top-cut-ico').textContent = '🎯';
     document.getElementById('r-pay-title').textContent = c.payTitle;
     document.getElementById('r-cut-title').textContent = c.cutTitle;
     // pw-title/pw-sub/pw-features removed during beta — paywall replaced with Coming Soon card
@@ -1563,10 +1571,19 @@
       guestNotice.style.display = (isGuest && !currentUser) ? 'block' : 'none';
     }
 
-    // FREE: top headline (first item of the cut/risk list, always shown)
+    // FREE: top headline (first item of the cut/risk list, always shown) — the "fix this first" callout
     const topCut = (d.costCuts && d.costCuts[0]) || null;
     document.getElementById('r-top-cut-title').textContent = topCut ? topCut.title : (scanMode === 'investor' ? 'No major red flags found' : 'No major cuts found');
     document.getElementById('r-top-cut-desc').textContent = topCut ? topCut.desc : 'Your spending looks reasonable for your revenue.';
+    const impactBadge = document.getElementById('r-top-cut-impact');
+    if (impactBadge) {
+      if (topCut && d.fixImpact && d.fixImpact !== 'N/A') {
+        impactBadge.textContent = d.fixImpact;
+        impactBadge.style.display = 'inline-block';
+      } else {
+        impactBadge.style.display = 'none';
+      }
+    }
 
     const metricsEl = document.getElementById('r-metrics');
     if (metricsEl) {

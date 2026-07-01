@@ -127,6 +127,10 @@ export default async function handler(req) {
       ? `- "costCuts" MUST be ordered with the single biggest/most concerning red flag first — that first item is shown to free users as the headline, so make it the most important thing an investor needs to know.`
       : `- "costCuts" MUST be ordered with the single biggest/most important opportunity first — that first item is shown to free users as the headline, so make it the most actionable one.`;
 
+    const fixImpactFraming = scanMode === 'investor'
+      ? `"fixImpact": "<short phrase estimating how much the overall safety score could move if the #1 risk above (costCuts[0]) were resolved, e.g. '+10-15 points' or 'Could move from Moderate Risk to Safe'>"`
+      : `"fixImpact": "<short phrase estimating how much the health score could move if the #1 opportunity above (costCuts[0]) were addressed, e.g. '+8-12 points' or 'Could move from At Risk to Healthy'>"`;
+
     const prompt = `${personaBlock}
 
 Analyze this business and return ONLY valid JSON, no preamble, no markdown fences, nothing else.
@@ -154,7 +158,8 @@ Return JSON in EXACTLY this shape:
   ],
   ${payBenchmarkFraming},
   ${industryComparisonFraming},
-  ${costCutsFraming}
+  ${costCutsFraming},
+  ${fixImpactFraming}
 }
 
 Rules:
@@ -166,6 +171,11 @@ ${orderingRule}
 
     return await callGroqForJson(prompt, (parsed) => {
       if (!parsed || typeof parsed !== 'object') return;
+      // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
+      if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
+        const topColor = parsed.costCuts?.[0]?.color;
+        parsed.fixImpact = topColor === 'red' ? 'High impact on your score' : topColor === 'amb' ? 'Moderate impact on your score' : 'Worth addressing';
+      }
       if (scanMode !== 'owner') return; // payroll safety calculator is an owner-mode feature only
       const revenueNum = parseMoney(revenue);
       const expensesNum = parseMoney(expenses);
@@ -335,7 +345,8 @@ async function handleStockAnalysis(ticker, companyName) {
         buyCount: 0,
         sellCount: 0,
         recentTransactions: []
-      }
+      },
+      fixImpact: 'N/A'
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -534,7 +545,8 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
   },
   "insiderSentiment": {
     "summary": "<1-2 sentences interpreting what the insider buying/selling activity (${insiderNote}) suggests about executive confidence — do not restate the raw numbers, interpret them>"
-  }
+  },
+  "fixImpact": "<short phrase estimating how much the overall business-health score could move if the #1 risk above (costCuts[0]) were resolved, e.g. '+10-15 points' or 'Could move from Moderate Risk to Safe'>"
 }
 
 Rules:
@@ -546,6 +558,11 @@ Rules:
 
   return await callGroqForJson(prompt, (parsed) => {
     if (!parsed || typeof parsed !== 'object') return;
+    // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
+    if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
+      const topColor = parsed.costCuts?.[0]?.color;
+      parsed.fixImpact = topColor === 'red' ? 'High impact on your score' : topColor === 'amb' ? 'Moderate impact on your score' : 'Worth watching';
+    }
     if (!parsed.stockAnalysis || typeof parsed.stockAnalysis !== 'object') parsed.stockAnalysis = {};
     const sa = parsed.stockAnalysis;
     let safetyScore = Number(sa.safetyScore);
