@@ -199,6 +199,17 @@
     }
     .sim-reset-btn:hover { border-color: var(--border-hover); color: var(--text); }
 
+    /* COMPETITOR SCANNER */
+    .competitor-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+    .competitor-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 12px 10px; text-align: left; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+      font-family: inherit; color: inherit;
+    }
+    .competitor-card:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .competitor-card .competitor-ticker { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 15px; color: var(--text); margin-bottom: 2px; }
+    .competitor-card .competitor-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
     /* FIX THIS FIRST CALLOUT */
     .fix-first-card { background: var(--amber-dim); border: 1px solid rgba(245,158,11,0.4); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display: flex; gap: 12px; align-items: flex-start; }
     .fix-first-card .insight-ico { background: rgba(245,158,11,0.3); }
@@ -707,6 +718,11 @@
     <div class="dive-card" id="r-compare-card" style="display:none;">
       <div class="dive-body">
         <div class="section-title">Compare with another stock</div>
+
+        <div id="r-competitors-area" style="display:none; margin-bottom:14px;">
+          <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Top competitors — tap to compare</div>
+          <div class="competitor-cards" id="r-competitor-cards"></div>
+        </div>
 
         <button class="btn-outline" id="compare-cta-btn" onclick="showCompareSearch()" style="width:100%;">+ Compare with another stock</button>
 
@@ -1845,6 +1861,30 @@
     runCompareScan(symbol, description);
   }
 
+  // ── COMPETITOR SCANNER (auto-suggested peers, reuses the compare-stock flow above) ──
+  function renderCompetitors(list) {
+    const area = document.getElementById('r-competitors-area');
+    const cardsEl = document.getElementById('r-competitor-cards');
+    if (!area || !cardsEl) return;
+    if (!list || !list.length) {
+      area.style.display = 'none';
+      cardsEl.innerHTML = '';
+      return;
+    }
+    area.style.display = 'block';
+    cardsEl.innerHTML = list.map(c => `
+      <button type="button" class="competitor-card" data-ticker="${escapeHtml(c.ticker)}" data-name="${escapeHtml(c.companyName)}" onclick="runCompetitorClick(this)">
+        <div class="competitor-ticker">${escapeHtml(c.ticker)}</div>
+        <div class="competitor-name">${escapeHtml(c.companyName)}</div>
+      </button>`).join('');
+  }
+
+  function runCompetitorClick(btn) {
+    document.getElementById('compare-cta-btn').style.display = 'none';
+    document.getElementById('compare-search-area').style.display = 'none';
+    runCompareScan(btn.dataset.ticker, btn.dataset.name);
+  }
+
   async function runCompareScan(ticker, companyName) {
     const errBox = document.getElementById('compare-err-box');
     errBox.style.display = 'none';
@@ -2185,6 +2225,7 @@
         document.getElementById('compare-loading').style.display = 'none';
         document.getElementById('compare-result-area').style.display = 'none';
         document.getElementById('compare-result-area').innerHTML = '';
+        renderCompetitors(d.competitors);
       } else {
         compareCard.style.display = 'none';
       }

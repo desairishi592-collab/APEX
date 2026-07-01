@@ -5,6 +5,38 @@ function parseMoney(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Resolves Finnhub's peers list into a short list of named competitors for the
+// "Compare with another stock" cards. Fetches a couple extra peer profiles beyond
+// the 4 needed in case some tickers don't resolve to a company name.
+async function fetchCompetitors(symbol, finnhubKey) {
+  try {
+    const peersRes = await fetch(`https://finnhub.io/api/v1/stock/peers?symbol=${symbol}&token=${finnhubKey}`);
+    if (!peersRes.ok) return [];
+    const peers = await peersRes.json();
+    const peerTickers = [...new Set(
+      (Array.isArray(peers) ? peers : [])
+        .map(p => String(p).toUpperCase())
+        .filter(p => p && p !== symbol)
+    )].slice(0, 6);
+
+    const profiles = await Promise.all(peerTickers.map(async (peerSymbol) => {
+      try {
+        const profRes = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${peerSymbol}&token=${finnhubKey}`);
+        if (!profRes.ok) return null;
+        const prof = await profRes.json();
+        if (!prof || !prof.name) return null;
+        return { ticker: peerSymbol, companyName: prof.name };
+      } catch {
+        return null;
+      }
+    }));
+
+    return profiles.filter(Boolean).slice(0, 4);
+  } catch {
+    return [];
+  }
+}
+
 // Deterministic 0-100 "quality score" computed directly from real Finnhub numbers.
 // The AI's own top-level score compresses toward a narrow "healthy" band (e.g. a
 // mega-cap tech company with 147% ROE and an energy major with 10% ROE both landing
@@ -348,6 +380,10 @@ async function handleStockAnalysis(ticker, companyName) {
   // (financials/reported was fetched here previously but never used — dropped to cut Finnhub call volume)
   let quote = null, profile = null, metrics = null, insiderTx = null;
 
+  // Kicked off now (not awaited) so the peer/competitor lookups overlap with the rest of
+  // this function's work instead of adding their own serial round-trip at the end.
+  const competitorsPromise = fetchCompetitors(symbol, finnhubKey);
+
   try {
     const [quoteRes, profileRes, metricsRes, insiderRes] = await Promise.all([
       fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`),
@@ -626,6 +662,8 @@ Rules:
 - If there is no recent insider activity, say so plainly rather than speculating.
 - Return ONLY the JSON object.`;
 
+  const competitors = await competitorsPromise;
+
   return await callGroqForJson(prompt, (parsed) => {
     if (!parsed || typeof parsed !== 'object') return;
     clampIndustryPercentiles(parsed);
@@ -677,5 +715,8 @@ Rules:
         ? 'No recent open-market insider transactions to analyze.'
         : `Insiders have been net ${insiderSentiment === 'Bullish' ? 'buying' : insiderSentiment === 'Bearish' ? 'selling' : 'mixed'} recently.`;
     }
+
+    // Competitor cards — fetched directly from Finnhub, not left to the AI.
+    parsed.competitors = competitors;
   });
 }
