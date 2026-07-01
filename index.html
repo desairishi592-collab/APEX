@@ -139,6 +139,17 @@
     .signal-badge.neutral { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
     .signal-badge.nodata { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
 
+    /* STOCK COMPARISON */
+    .compare-winner-banner { background: var(--accent-dim); border: 1px solid var(--accent-glow); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; font-size: 13px; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+    .compare-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; }
+    .compare-col.winner { border-color: var(--green); }
+    .compare-col-title { font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .compare-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; gap: 8px; }
+    .compare-row:last-child { border-bottom: none; }
+    .compare-row .cr-label { color: var(--muted); }
+    .compare-row .cr-val { font-weight: 500; color: var(--text); text-align: right; }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -228,6 +239,7 @@
       .score-card { flex-direction: column; text-align: center; }
       .biz-grid { grid-template-columns: 1fr; }
       .action-row { flex-direction: column; }
+      .compare-grid { grid-template-columns: 1fr; }
     }
 
     /* CHAT WIDGET */
@@ -394,7 +406,7 @@
       <span class="biz-label">Tell APEX which stock to evaluate</span>
       <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
         <div class="search-wrap">
-          <input type="text" id="stock-ticker" placeholder="Search company or ticker (e.g. Apple or AAPL)" autocomplete="off" oninput="onStockSearchInput(this.value)" onfocus="onStockSearchInput(this.value)" />
+          <input type="text" id="stock-ticker" placeholder="Search company or ticker (e.g. Apple or AAPL)" autocomplete="off" oninput="onStockSearchInput(this.value, 'primary', 'stock-search-dropdown')" onfocus="onStockSearchInput(this.value, 'primary', 'stock-search-dropdown')" />
           <div class="search-dropdown" id="stock-search-dropdown" style="display:none;"></div>
         </div>
         <input type="text" id="stock-name" placeholder="Company name (optional)" />
@@ -520,6 +532,32 @@
       </div>
     </div>
 
+    <!-- STOCK ONLY: compare this stock against a second one, side by side -->
+    <div class="dive-card" id="r-compare-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Compare with another stock</div>
+
+        <button class="btn-outline" id="compare-cta-btn" onclick="showCompareSearch()" style="width:100%;">+ Compare with another stock</button>
+
+        <div id="compare-search-area" style="display:none;">
+          <div class="search-wrap" style="margin-bottom:10px;">
+            <input type="text" id="compare-ticker" placeholder="Search company or ticker to compare (e.g. Microsoft or MSFT)" autocomplete="off"
+              oninput="onStockSearchInput(this.value, 'compare', 'compare-search-dropdown')"
+              onfocus="onStockSearchInput(this.value, 'compare', 'compare-search-dropdown')" />
+            <div class="search-dropdown" id="compare-search-dropdown" style="display:none;"></div>
+          </div>
+          <button class="rescan-btn" onclick="hideCompareSearch()">Cancel</button>
+          <div class="err" id="compare-err-box" style="display:none; margin-top:10px;"></div>
+        </div>
+
+        <div id="compare-loading" style="display:none; text-align:center; padding:1.5rem 0; color:var(--muted); font-size:13px;">
+          Analyzing second stock…
+        </div>
+
+        <div id="compare-result-area" style="display:none;"></div>
+      </div>
+    </div>
+
     <div class="dive-card" id="r-industry-card">
       <div class="dive-body">
         <div class="section-title">How you compare to similar businesses</div>
@@ -566,6 +604,9 @@
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
+  let currentStockTicker = null; // ticker symbol of the primary stock scan, used for stock comparison
+  let compareStockData = null;
+  let compareStockName = '';
 
   // Effective Pro status: real Pro OR dev preview toggle (preview never touches billing/DB)
   function effectiveIsPro() {
@@ -1127,38 +1168,43 @@
   }
 
   // ── PUBLIC STOCK SCAN (investor mode only) ──
-  // ── STOCK SEARCH AUTOCOMPLETE ──
-  let stockSearchDebounce = null;
-  let stockSearchAbortController = null;
-  let lastStockSearchResults = [];
+  // ── STOCK SEARCH AUTOCOMPLETE (shared by the primary form and the stock comparison box) ──
+  const searchContexts = {}; // contextId -> { debounceTimer, abortController, results }
 
-  function onStockSearchInput(query) {
-    const dropdown = document.getElementById('stock-search-dropdown');
-    clearTimeout(stockSearchDebounce);
+  function getSearchContext(contextId) {
+    if (!searchContexts[contextId]) searchContexts[contextId] = { debounceTimer: null, abortController: null, results: [] };
+    return searchContexts[contextId];
+  }
+
+  function onStockSearchInput(query, contextId, dropdownId) {
+    const ctx = getSearchContext(contextId);
+    const dropdown = document.getElementById(dropdownId);
+    clearTimeout(ctx.debounceTimer);
     const q = query.trim();
     if (!q) {
       dropdown.style.display = 'none';
       dropdown.innerHTML = '';
       return;
     }
-    stockSearchDebounce = setTimeout(() => fetchStockSearch(q), 300);
+    ctx.debounceTimer = setTimeout(() => fetchStockSearch(q, contextId, dropdownId), 300);
   }
 
-  async function fetchStockSearch(q) {
-    const dropdown = document.getElementById('stock-search-dropdown');
-    if (stockSearchAbortController) stockSearchAbortController.abort();
-    stockSearchAbortController = new AbortController();
+  async function fetchStockSearch(q, contextId, dropdownId) {
+    const ctx = getSearchContext(contextId);
+    const dropdown = document.getElementById(dropdownId);
+    if (ctx.abortController) ctx.abortController.abort();
+    ctx.abortController = new AbortController();
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: stockSearchAbortController.signal });
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctx.abortController.signal });
       const data = await res.json();
-      lastStockSearchResults = data.results || [];
-      if (!lastStockSearchResults.length) {
+      ctx.results = data.results || [];
+      if (!ctx.results.length) {
         dropdown.innerHTML = '<div class="search-result search-empty">No matches found</div>';
         dropdown.style.display = 'block';
         return;
       }
-      dropdown.innerHTML = lastStockSearchResults.map((r, i) => `
-        <div class="search-result" data-idx="${i}">
+      dropdown.innerHTML = ctx.results.map((r, i) => `
+        <div class="search-result" data-idx="${i}" data-ctx="${contextId}">
           <span class="sr-symbol">${escapeHtml(r.symbol)}</span>
           <span class="sr-desc">${escapeHtml(r.description)}</span>
         </div>`).join('');
@@ -1171,13 +1217,17 @@
   document.addEventListener('click', (e) => {
     const item = e.target.closest('.search-result:not(.search-empty)');
     if (item) {
-      const r = lastStockSearchResults[Number(item.dataset.idx)];
-      if (r) selectStockSearchResult(r.symbol, r.description);
+      const contextId = item.dataset.ctx;
+      const ctx = searchContexts[contextId];
+      const r = ctx && ctx.results[Number(item.dataset.idx)];
+      if (r) {
+        if (contextId === 'compare') selectCompareSearchResult(r.symbol, r.description);
+        else selectStockSearchResult(r.symbol, r.description);
+      }
       return;
     }
     if (!e.target.closest('.search-wrap')) {
-      const dropdown = document.getElementById('stock-search-dropdown');
-      if (dropdown) dropdown.style.display = 'none';
+      document.querySelectorAll('.search-dropdown').forEach(d => d.style.display = 'none');
     }
   });
 
@@ -1225,6 +1275,7 @@
       if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
       scanData = data;
       currentScanBizName = companyName || ticker;
+      currentStockTicker = ticker.toUpperCase();
       renderResults(data);
       if (currentUser) {
         await saveScanAndIncrement(companyName || ticker, 'Public stock', data);
@@ -1237,6 +1288,163 @@
       err.textContent = 'Something went wrong: ' + e.message;
       err.style.display = 'block';
     }
+  }
+
+  // ── SIDE-BY-SIDE STOCK COMPARISON ──
+  function showCompareSearch() {
+    document.getElementById('compare-cta-btn').style.display = 'none';
+    document.getElementById('compare-search-area').style.display = 'block';
+    document.getElementById('compare-ticker').focus();
+  }
+
+  function hideCompareSearch() {
+    document.getElementById('compare-search-area').style.display = 'none';
+    document.getElementById('compare-ticker').value = '';
+    document.getElementById('compare-search-dropdown').style.display = 'none';
+    document.getElementById('compare-err-box').style.display = 'none';
+    // Only restore the CTA button if there's no comparison result already showing
+    if (!compareStockData) {
+      document.getElementById('compare-cta-btn').style.display = 'block';
+    }
+  }
+
+  function selectCompareSearchResult(symbol, description) {
+    document.getElementById('compare-ticker').value = symbol;
+    document.getElementById('compare-search-dropdown').style.display = 'none';
+    runCompareScan(symbol, description);
+  }
+
+  async function runCompareScan(ticker, companyName) {
+    const errBox = document.getElementById('compare-err-box');
+    errBox.style.display = 'none';
+
+    const trimmedTicker = (ticker || '').trim();
+    if (!trimmedTicker) return;
+
+    if (currentStockTicker && trimmedTicker.toUpperCase() === currentStockTicker) {
+      errBox.textContent = '⚠ Choose a different stock to compare against.';
+      errBox.style.display = 'block';
+      return;
+    }
+
+    if (!(await checkScanAllowed('compare-err-box'))) return;
+
+    document.getElementById('compare-search-area').style.display = 'none';
+    document.getElementById('compare-loading').style.display = 'block';
+
+    const displayName = (companyName || trimmedTicker).trim();
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stockTicker: trimmedTicker,
+          stockCompanyName: companyName,
+          mode: 'investor',
+          subMode: 'public'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
+      if (data.badge === 'Unknown ticker') throw new Error(`"${trimmedTicker}" could not be found as a recognized ticker.`);
+
+      compareStockData = data;
+      compareStockName = displayName;
+      renderComparison(scanData, currentScanBizName, compareStockData, compareStockName);
+
+      if (currentUser) {
+        await saveScanAndIncrement(displayName, 'Public stock', data);
+      } else if (isGuest) {
+        guestScanCount += 1;
+      }
+    } catch (e) {
+      document.getElementById('compare-loading').style.display = 'none';
+      document.getElementById('compare-search-area').style.display = 'block';
+      errBox.textContent = 'Something went wrong: ' + e.message;
+      errBox.style.display = 'block';
+    }
+  }
+
+  function computeComparisonWinner(a, b) {
+    const combinedA = Math.round(((a.score || 0) + (a.stockAnalysis?.safetyScore ?? 50)) / 2);
+    const combinedB = Math.round(((b.score || 0) + (b.stockAnalysis?.safetyScore ?? 50)) / 2);
+    if (combinedA === combinedB) return { winner: null, combinedA, combinedB };
+    return { winner: combinedA > combinedB ? 'a' : 'b', combinedA, combinedB };
+  }
+
+  function buildComparisonReason(nameA, a, nameB, b, winnerKey) {
+    if (!winnerKey) {
+      return `${nameA} and ${nameB} are evenly matched overall — the choice comes down to personal preference (e.g. growth vs. income).`;
+    }
+    const winner = winnerKey === 'a' ? a : b;
+    const loser = winnerKey === 'a' ? b : a;
+    const winnerName = winnerKey === 'a' ? nameA : nameB;
+    const loserName = winnerKey === 'a' ? nameB : nameA;
+
+    const reasons = [];
+    const wSafety = winner.stockAnalysis?.safetyScore, lSafety = loser.stockAnalysis?.safetyScore;
+    if (wSafety != null && lSafety != null && Math.abs(wSafety - lSafety) >= 5) {
+      reasons.push(`a stronger stock safety score (${wSafety} vs ${lSafety})`);
+    }
+    if (((winner.score || 0) - (loser.score || 0)) >= 5) {
+      reasons.push(`a healthier underlying business (${winner.score} vs ${loser.score})`);
+    }
+    if (winner.stockAnalysis?.signal && loser.stockAnalysis?.signal && winner.stockAnalysis.signal !== loser.stockAnalysis.signal) {
+      reasons.push(`a ${winner.stockAnalysis.signal} signal vs. ${loserName}'s ${loser.stockAnalysis.signal}`);
+    }
+    const reasonText = reasons.length ? reasons.join(', ') : 'a better overall risk/reward profile';
+    return `${winnerName} looks like the stronger pick right now, with ${reasonText}.`;
+  }
+
+  function renderCompareColumn(name, d, isWinner) {
+    const sa = d.stockAnalysis || {};
+    const signalLower = (sa.signal || '').toLowerCase();
+    const signalClass = signalLower === 'buy' ? 'buy' : signalLower === 'sell' ? 'sell' : 'hold';
+    return `
+      <div class="compare-col ${isWinner ? 'winner' : ''}">
+        <div class="compare-col-title">
+          <span>${escapeHtml(name)}</span>
+          ${isWinner ? '<span style="color:var(--green); font-size:12px;">🏆 Winner</span>' : ''}
+        </div>
+        <div class="compare-row"><span class="cr-label">Business health</span><span class="cr-val">${d.score ?? '—'}/100</span></div>
+        <div class="compare-row"><span class="cr-label">Stock safety score</span><span class="cr-val">${sa.safetyScore ?? '—'}/100</span></div>
+        <div class="compare-row"><span class="cr-label">Signal</span><span class="cr-val"><span class="signal-badge ${signalClass}">${escapeHtml(sa.signal || '—')}</span></span></div>
+        <div class="compare-row"><span class="cr-label">Valuation</span><span class="cr-val">${escapeHtml(sa.valuation?.verdict || '—')}</span></div>
+        <div class="compare-row"><span class="cr-label">Momentum</span><span class="cr-val">${escapeHtml(sa.momentum?.trend || '—')}</span></div>
+        <div class="compare-row"><span class="cr-label">Dividend</span><span class="cr-val">${sa.dividend?.paysDividend ? escapeHtml(sa.dividend.yield) : 'None'}</span></div>
+      </div>`;
+  }
+
+  function renderComparison(a, nameA, b, nameB) {
+    document.getElementById('compare-loading').style.display = 'none';
+    const resultArea = document.getElementById('compare-result-area');
+    resultArea.style.display = 'block';
+
+    const { winner } = computeComparisonWinner(a, b);
+    const reasonText = buildComparisonReason(nameA, a, nameB, b, winner);
+
+    resultArea.innerHTML = `
+      <div class="compare-winner-banner">
+        ${winner ? `🏆 <strong>${escapeHtml(winner === 'a' ? nameA : nameB)}</strong> looks like the stronger pick.` : `🤝 It's close — both look similarly attractive right now.`}
+        <div style="margin-top:4px; color:var(--muted); font-size:12px;">${escapeHtml(reasonText)}</div>
+      </div>
+      <div class="compare-grid">
+        ${renderCompareColumn(nameA, a, winner === 'a')}
+        ${renderCompareColumn(nameB, b, winner === 'b')}
+      </div>
+      <button class="rescan-btn" style="margin-top:12px;" onclick="resetCompare()">Compare with a different stock</button>
+    `;
+  }
+
+  function resetCompare() {
+    compareStockData = null;
+    compareStockName = '';
+    document.getElementById('compare-result-area').style.display = 'none';
+    document.getElementById('compare-result-area').innerHTML = '';
+    document.getElementById('compare-ticker').value = '';
+    showCompareSearch();
   }
 
   // ── SAVE SCAN TO HISTORY + INCREMENT COUNT ──
@@ -1399,6 +1607,26 @@
           </div>`).join('') || '<div class="dive-row"><span class="dr-label">No recent insider transactions</span></div>';
       } else {
         insiderCard.style.display = 'none';
+      }
+    }
+
+    // STOCK ONLY: compare with another stock — reset any prior comparison whenever a new primary scan renders
+    const compareCard = document.getElementById('r-compare-card');
+    if (compareCard) {
+      if (d.isPublicStock) {
+        compareCard.style.display = 'block';
+        compareStockData = null;
+        compareStockName = '';
+        document.getElementById('compare-cta-btn').style.display = 'block';
+        document.getElementById('compare-search-area').style.display = 'none';
+        document.getElementById('compare-ticker').value = '';
+        document.getElementById('compare-search-dropdown').style.display = 'none';
+        document.getElementById('compare-err-box').style.display = 'none';
+        document.getElementById('compare-loading').style.display = 'none';
+        document.getElementById('compare-result-area').style.display = 'none';
+        document.getElementById('compare-result-area').innerHTML = '';
+      } else {
+        compareCard.style.display = 'none';
       }
     }
 
