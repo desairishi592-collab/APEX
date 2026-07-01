@@ -1,26 +1,33 @@
 export const config = { runtime: 'edge' };
 
-// Curated defaults shown before the user types anything. Each has a best-guess
-// preferred symbol (validated against Finnhub's own results below, so a wrong
-// exchange-suffix guess self-corrects to whatever Finnhub actually returns).
-const POPULAR_COMPANIES = [
-  { name: 'Apple', preferredSymbol: 'AAPL' },
-  { name: 'Microsoft', preferredSymbol: 'MSFT' },
-  { name: 'Alphabet', preferredSymbol: 'GOOGL' },
-  { name: 'Amazon', preferredSymbol: 'AMZN' },
-  { name: 'Tesla', preferredSymbol: 'TSLA' },
+// These tickers are unambiguous and don't need live validation — skip the Finnhub
+// round-trip entirely to keep the default list cheap on API rate limits.
+const POPULAR_COMPANIES_STATIC = [
+  { symbol: 'AAPL', description: 'APPLE INC', type: 'Common Stock' },
+  { symbol: 'MSFT', description: 'MICROSOFT CORP', type: 'Common Stock' },
+  { symbol: 'GOOGL', description: 'ALPHABET INC', type: 'Common Stock' },
+  { symbol: 'AMZN', description: 'AMAZON.COM INC', type: 'Common Stock' },
+  { symbol: 'TSLA', description: 'TESLA INC', type: 'Common Stock' },
+  { symbol: 'BABA', description: 'ALIBABA GROUP HOLDING LTD', type: 'Common Stock' },
+  { symbol: 'META', description: 'META PLATFORMS INC', type: 'Common Stock' },
+  { symbol: 'NFLX', description: 'NETFLIX INC', type: 'Common Stock' },
+  { symbol: 'NVDA', description: 'NVIDIA CORP', type: 'Common Stock' }
+];
+
+// Only these have real exchange-suffix ambiguity worth resolving live against
+// Finnhub (e.g. confirming Samsung's KRX suffix rather than guessing it).
+const POPULAR_COMPANIES_DYNAMIC = [
   { name: 'Samsung Electronics', preferredSymbol: '005930.KS' },
   { name: 'Toyota Motor', preferredSymbol: '7203.T' },
-  { name: 'LVMH Moet Hennessy', preferredSymbol: 'MC.PA' },
-  { name: 'Alibaba', preferredSymbol: 'BABA' },
-  { name: 'Meta Platforms', preferredSymbol: 'META' },
-  { name: 'Netflix', preferredSymbol: 'NFLX' },
-  { name: 'Nvidia', preferredSymbol: 'NVDA' }
+  { name: 'LVMH Moet Hennessy', preferredSymbol: 'MC.PA' }
 ];
 
 async function searchFinnhub(query, finnhubKey) {
   const res = await fetch(`https://finnhub.io/api/v1/search?q=${encodeURIComponent(query)}&token=${finnhubKey}`);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Finnhub returned ${res.status}${detail ? `: ${detail}` : ''}`);
+  }
   const data = await res.json();
   return data?.result || [];
 }
@@ -44,28 +51,22 @@ export default async function handler(req) {
   const q = (searchParams.get('q') || '').trim();
   const popular = searchParams.get('popular') === '1';
 
-  // Default list shown before the user has typed anything — resolved live against
-  // Finnhub so exchange-suffix conventions (e.g. Samsung on KRX, Toyota on TSE,
-  // LVMH on Euronext Paris) are always correct rather than hardcoded guesses.
+  // Default list shown before the user has typed anything. The 9 unambiguous
+  // US megacaps are static (no Finnhub call, so this always renders even if
+  // Finnhub is down or rate-limited); only the 3 exchange-suffix-ambiguous
+  // international ones are resolved live, each independently best-effort.
   if (popular && !q) {
-    let resolved;
-    try {
-      resolved = await Promise.all(POPULAR_COMPANIES.map(async (c) => {
-        try {
-          const matches = await searchFinnhub(c.name, finnhubKey);
-          if (!matches.length) return null;
-          const best = matches.find(m => m.symbol === c.preferredSymbol) || matches[0];
-          return { symbol: best.symbol, description: best.description || c.name, type: best.type || '' };
-        } catch {
-          return null;
-        }
-      }));
-    } catch (fetchErr) {
-      return new Response(JSON.stringify({ error: 'Could not reach market data provider' }), {
-        status: 502, headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    return new Response(JSON.stringify({ results: resolved.filter(Boolean) }), {
+    const dynamicResults = await Promise.all(POPULAR_COMPANIES_DYNAMIC.map(async (c) => {
+      try {
+        const matches = await searchFinnhub(c.name, finnhubKey);
+        if (!matches.length) return null;
+        const best = matches.find(m => m.symbol === c.preferredSymbol) || matches[0];
+        return { symbol: best.symbol, description: best.description || c.name, type: best.type || '' };
+      } catch {
+        return null;
+      }
+    }));
+    return new Response(JSON.stringify({ results: [...POPULAR_COMPANIES_STATIC, ...dynamicResults.filter(Boolean)] }), {
       status: 200, headers: { 'Content-Type': 'application/json' }
     });
   }
@@ -80,7 +81,7 @@ export default async function handler(req) {
   try {
     matches = await searchFinnhub(q, finnhubKey);
   } catch (fetchErr) {
-    return new Response(JSON.stringify({ error: 'Could not reach market data provider' }), {
+    return new Response(JSON.stringify({ error: 'Could not reach market data provider', detail: fetchErr.message }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }

@@ -55,7 +55,14 @@
     .biz-grid select option { background: var(--card); }
 
     .search-wrap { position: relative; }
-    .search-wrap input { width: 100%; box-sizing: border-box; }
+    .search-wrap input {
+      width: 100%; box-sizing: border-box;
+      padding: 10px 12px; background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text); font-size: 13px;
+      font-family: 'Inter', sans-serif; transition: border-color 0.2s;
+    }
+    .search-wrap input::placeholder { color: var(--dim); }
+    .search-wrap input:focus { outline: none; border-color: var(--accent); }
     .search-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 260px; overflow-y: auto; z-index: 20; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
     .search-result { padding: 10px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; border-bottom: 1px solid var(--border); }
     .search-result:last-child { border-bottom: none; }
@@ -1235,6 +1242,14 @@
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctx.abortController.signal });
       const data = await res.json();
+      // Distinguish a real upstream failure from a genuine zero-match search —
+      // otherwise API/rate-limit errors silently look identical to "no matches found".
+      if (!res.ok || data.error) {
+        getSearchContext(contextId).results = [];
+        dropdown.innerHTML = '<div class="search-result search-empty">Search temporarily unavailable — try again in a moment</div>';
+        dropdown.style.display = 'block';
+        return;
+      }
       renderSearchDropdown(dropdown, contextId, data.results || []);
     } catch (e) {
       if (e.name !== 'AbortError') dropdown.style.display = 'none';
