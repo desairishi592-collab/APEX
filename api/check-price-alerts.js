@@ -30,8 +30,7 @@ async function sendAlertEmail(resendKey, alert, currentPrice) {
       html: `<p>Good news — <strong>${alert.company_name || alert.ticker} (${alert.ticker})</strong> just hit your target price of <strong>$${alert.target_price}</strong>. It's currently trading at $${currentPrice.toFixed(2)}.</p><p>This might be the entry point you were waiting for.</p>`
     })
   });
-  const rawText = await res.text(); // TEMP: surfaced via resendDebug below, remove once email delivery is confirmed
-  return { ok: res.ok, status: res.status, raw: rawText.slice(0, 300) };
+  return res.ok;
 }
 
 // Runs on a schedule (see vercel.json crons) to check every active price alert against
@@ -59,15 +58,6 @@ export default async function handler(req) {
     });
   }
 
-  // TEMP: safe partial reveal to diagnose a key-value mismatch, remove once resolved
-  const keyDebug = {
-    finnhubKeyLength: finnhubKey.length,
-    finnhubKeyPreview: finnhubKey.slice(0, 4) + '...' + finnhubKey.slice(-4),
-    finnhubKeyHasWhitespace: /\s/.test(finnhubKey),
-    serviceRoleKeyLength: serviceRoleKey.length,
-    resendKeySet: !!resendKey
-  };
-
   let alerts;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/price_alerts?select=*&status=eq.active`, {
@@ -91,22 +81,17 @@ export default async function handler(req) {
   // multiple alerts) are watching the same stock.
   const tickers = [...new Set(alerts.map(a => a.ticker))];
   const priceByTicker = {};
-  const debugTickerInfo = []; // TEMP: remove once the live trigger path is confirmed working
   await Promise.all(tickers.map(async (ticker) => {
     try {
       const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=${finnhubKey}`);
-      const rawText = await res.text();
-      let data = null;
-      try { data = JSON.parse(rawText); } catch {}
+      const data = await res.json();
       if (data && typeof data.c === 'number' && data.c > 0) priceByTicker[ticker] = data.c;
-      debugTickerInfo.push({ ticker, httpStatus: res.status, ok: res.ok, raw: rawText.slice(0, 300) });
-    } catch (e) {
-      debugTickerInfo.push({ ticker, fetchError: e.message });
+    } catch {
+      // Non-fatal: this ticker's alerts just get re-checked next run
     }
   }));
 
   let triggeredCount = 0, emailedCount = 0;
-  const resendDebug = []; // TEMP: remove once email delivery is confirmed
 
   for (const alert of alerts) {
     const currentPrice = priceByTicker[alert.ticker];
@@ -120,13 +105,11 @@ export default async function handler(req) {
     if (resendKey) {
       try {
         const sent = await sendAlertEmail(resendKey, alert, currentPrice);
-        resendDebug.push({ alertId: alert.id, ...sent });
-        if (sent.ok) {
+        if (sent) {
           emailedCount++;
           await patchAlert(serviceRoleKey, alert.id, { notified_at: new Date().toISOString() });
         }
-      } catch (e) {
-        resendDebug.push({ alertId: alert.id, sendError: e.message });
+      } catch {
         // Non-fatal: alert is still marked triggered so it won't re-fire; email can be retried manually
       }
     }
@@ -136,9 +119,6 @@ export default async function handler(req) {
     checked: alerts.length,
     tickers: tickers.length,
     triggered: triggeredCount,
-    emailed: emailedCount,
-    debugTickerInfo, // TEMP: remove once the live trigger path is confirmed working
-    keyDebug, // TEMP: remove once the live trigger path is confirmed working
-    resendDebug // TEMP: remove once email delivery is confirmed
+    emailed: emailedCount
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
