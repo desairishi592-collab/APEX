@@ -5,6 +5,17 @@ function parseMoney(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Guards against the AI returning a non-numeric or out-of-range percentile.
+function clampIndustryPercentiles(parsed) {
+  if (!parsed || !Array.isArray(parsed.industryComparison)) return;
+  parsed.industryComparison.forEach(row => {
+    if (!row || typeof row !== 'object') return;
+    let p = Number(row.percentile);
+    if (!Number.isFinite(p)) p = 50;
+    row.percentile = Math.max(0, Math.min(100, Math.round(p)));
+  });
+}
+
 // Deterministic payroll ceiling — not left to the AI so the dollar figure is
 // reproducible and grounded in the actual numbers, not a language-model guess.
 // Combines two independent estimates and takes the more conservative (lower) one:
@@ -113,14 +124,14 @@ export default async function handler(req) {
 
     const industryComparisonFraming = scanMode === 'investor'
       ? `"industryComparison": [
-    { "label": "<a comparison point, e.g. 'Profit margin vs. industry'>", "value": "<how this business compares, e.g. '12% vs. 18% typical — below average'>", "color": "grn"|"amb"|"red" },
-    { "label": "<another comparison point, e.g. 'Revenue per employee vs. industry'>", "value": "<comparison>", "color": "grn"|"amb"|"red" },
-    { "label": "<another comparison point, e.g. 'Cash runway vs. industry'>", "value": "<comparison>", "color": "grn"|"amb"|"red" }
+    { "metric": "<a metric name, e.g. 'Profit Margin'>", "percentile": <integer 0-100 — where this business ranks among typical ${industry} businesses of similar size; 100 means best-in-class, 0 means worst>, "summary": "<one natural sentence stating the ranking from an investor's point of view, e.g. 'This business's profit margins are in the top 30% of ${industry} companies.' or 'Debt levels here are higher than 70% of ${industry} businesses.'>", "color": "grn"|"amb"|"red" },
+    { "metric": "<another metric, e.g. 'Revenue per Employee'>", "percentile": <integer 0-100>, "summary": "<sentence>", "color": "grn"|"amb"|"red" },
+    { "metric": "<another metric, e.g. 'Debt Level' or 'Cash Runway'>", "percentile": <integer 0-100>, "summary": "<sentence>", "color": "grn"|"amb"|"red" }
   ]`
       : `"industryComparison": [
-    { "label": "<a comparison point, e.g. 'Profit margin vs. industry'>", "value": "<how this business compares to typical ${industry} businesses, e.g. '12% vs. 18% typical — room to improve'>", "color": "grn"|"amb"|"red" },
-    { "label": "<another comparison point, e.g. 'Revenue per employee vs. industry'>", "value": "<comparison>", "color": "grn"|"amb"|"red" },
-    { "label": "<another comparison point, e.g. 'Cash runway vs. industry'>", "value": "<comparison>", "color": "grn"|"amb"|"red" }
+    { "metric": "<a metric name, e.g. 'Profit Margin'>", "percentile": <integer 0-100 — where this business ranks among typical ${industry} businesses of similar size; 100 means best-in-class, 0 means worst>, "summary": "<one natural sentence stating the ranking directly to the owner, e.g. 'Your profit margins are in the top 30% of ${industry} companies.' or 'Your debt levels are higher than 70% of ${industry} businesses.'>", "color": "grn"|"amb"|"red" },
+    { "metric": "<another metric, e.g. 'Revenue per Employee'>", "percentile": <integer 0-100>, "summary": "<sentence>", "color": "grn"|"amb"|"red" },
+    { "metric": "<another metric, e.g. 'Debt Level' or 'Cash Runway'>", "percentile": <integer 0-100>, "summary": "<sentence>", "color": "grn"|"amb"|"red" }
   ]`;
 
     const orderingRule = scanMode === 'investor'
@@ -165,12 +176,13 @@ Return JSON in EXACTLY this shape:
 Rules:
 ${orderingRule}
 - "payBenchmark" should reflect realistic, industry-typical roles for a ${industry} business with ${employees} employees — infer likely roles (e.g. retail: cashier, store manager; restaurant: server, chef; SaaS: engineer, support).
-- "industryComparison" should compare this business's actual numbers (derived from the revenue/expenses given) against realistic typical benchmarks for a ${industry} business of similar size — be specific with numbers on both sides of the comparison.
+- "industryComparison" percentiles should be grounded in realistic typical benchmarks for a ${industry} business of similar size, derived from the revenue/expenses/employee count given — be specific and realistic, not generic (avoid defaulting every metric to 50).
 - Base numbers on the revenue, expenses, and employee count given. Be realistic, not generic.
 - Return ONLY the JSON object. No explanation, no markdown code fences.`;
 
     return await callGroqForJson(prompt, (parsed) => {
       if (!parsed || typeof parsed !== 'object') return;
+      clampIndustryPercentiles(parsed);
       // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
       if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
         const topColor = parsed.costCuts?.[0]?.color;
@@ -512,9 +524,9 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
     { "label": "52-Week Return", "value": "${yearReturn}", "type": "up"|"down"|"warn", "trend": "<how has the stock performed vs the broader market over the past year?>" }
   ],
   "industryComparison": [
-    { "label": "Debt/Equity vs. ${industry} peers", "value": "<${debtEquity} — contextualise this vs typical ${industry} companies>", "color": "grn"|"amb"|"red" },
-    { "label": "ROE vs. ${industry} peers", "value": "<${roe} — strong or weak return on equity for this sector?>", "color": "grn"|"amb"|"red" },
-    { "label": "Beta vs. market", "value": "<${beta} — how volatile is this vs. the broader market?>", "color": "grn"|"amb"|"red" }
+    { "metric": "Debt/Equity", "percentile": <integer 0-100 — where this company's debt/equity of ${debtEquity} ranks among typical ${industry} peers; 100 means best-in-class (lowest risk), 0 means worst>, "summary": "<one natural sentence, e.g. 'Debt levels here are lower than 70% of ${industry} companies.' or 'This company carries more debt than 80% of ${industry} peers.'>", "color": "grn"|"amb"|"red" },
+    { "metric": "Return on Equity", "percentile": <integer 0-100 — where ROE of ${roe} ranks among typical ${industry} peers>, "summary": "<one natural sentence, e.g. 'ROE is in the top 25% of ${industry} companies.'>", "color": "grn"|"amb"|"red" },
+    { "metric": "Volatility (Beta)", "percentile": <integer 0-100 — where beta of ${beta} ranks among typical ${industry} peers; 100 means most stable/least volatile>, "summary": "<one natural sentence, e.g. 'This stock is more volatile than 60% of ${industry} peers.'>", "color": "grn"|"amb"|"red" }
   ],
   "costCuts": [
     { "title": "<#1 most meaningful risk for an investor in this specific company — be accurate, not alarmist>", "desc": "<1 sentence explaining what this means and what to monitor>", "color": "red"|"amb"|"grn" },
@@ -558,6 +570,7 @@ Rules:
 
   return await callGroqForJson(prompt, (parsed) => {
     if (!parsed || typeof parsed !== 'object') return;
+    clampIndustryPercentiles(parsed);
     // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
     if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
       const topColor = parsed.costCuts?.[0]?.color;

@@ -172,6 +172,22 @@
     .fix-first-card .insight-ico { background: rgba(245,158,11,0.3); }
     .fix-impact-badge { display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 12px; background: rgba(245,158,11,0.2); color: var(--amber); vertical-align: middle; white-space: nowrap; }
 
+    /* INDUSTRY PERCENTILE COMPARISON */
+    .percentile-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .percentile-row:last-child { border-bottom: none; }
+    .percentile-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; font-size: 13px; }
+    .percentile-metric { color: var(--text); font-weight: 500; }
+    .percentile-value { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+    .percentile-value.grn { color: var(--green); }
+    .percentile-value.amb { color: var(--amber); }
+    .percentile-value.red { color: var(--red); }
+    .percentile-bar-track { height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin-bottom: 6px; }
+    .percentile-bar-fill { height: 100%; border-radius: 3px; }
+    .percentile-bar-fill.grn { background: var(--green); }
+    .percentile-bar-fill.amb { background: var(--amber); }
+    .percentile-bar-fill.red { background: var(--red); }
+    .percentile-summary { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -994,6 +1010,14 @@
     return div.innerHTML;
   }
 
+  function ordinalSuffix(n) {
+    const j = n % 10, k = n % 100;
+    if (j === 1 && k !== 11) return 'st';
+    if (j === 2 && k !== 12) return 'nd';
+    if (j === 3 && k !== 13) return 'rd';
+    return 'th';
+  }
+
   // ── PRO: SCORE TREND ──
   // Shows past scores for the same business name, so Pro users can see if they're improving.
   async function loadScoreTrend(bizName) {
@@ -1723,14 +1747,25 @@
       }
     }
 
-    // PRO: industry comparison
+    // PRO: industry percentile comparison
     const industryRows = document.getElementById('r-industry-rows');
     if (industryRows) {
-      industryRows.innerHTML = (d.industryComparison || []).map(r => `
-        <div class="dive-row">
-          <span class="dr-label">${r.label}</span>
-          <span class="dr-val ${r.color || ''}">${r.value}</span>
-        </div>`).join('') || '<div class="dive-row"><span class="dr-label">No comparison data available</span></div>';
+      const percentileRows = d.industryComparison || [];
+      industryRows.innerHTML = percentileRows.length ? percentileRows.map(r => {
+        const pct = Math.max(0, Math.min(100, Math.round(Number(r.percentile)) || 0));
+        const colorClass = r.color === 'red' ? 'red' : r.color === 'amb' ? 'amb' : 'grn';
+        return `
+          <div class="percentile-row">
+            <div class="percentile-row-head">
+              <span class="percentile-metric">${escapeHtml(r.metric || '')}</span>
+              <span class="percentile-value ${colorClass}">${pct}${ordinalSuffix(pct)} percentile</span>
+            </div>
+            <div class="percentile-bar-track">
+              <div class="percentile-bar-fill ${colorClass}" style="width:${pct}%;"></div>
+            </div>
+            <div class="percentile-summary">${escapeHtml(r.summary || '')}</div>
+          </div>`;
+      }).join('') : '<div class="dive-row"><span class="dr-label">No comparison data available</span></div>';
     }
 
     // PRO: full cost-cutting / risk plan (all items, including the free top one)
