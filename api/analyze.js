@@ -141,7 +141,7 @@ ${orderingRule}
 }
 
 // Shared helper: sends a prompt to Groq, expects back a JSON object, and wraps it in a Response.
-async function callGroqForJson(prompt) {
+async function callGroqForJson(prompt, postProcess) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'Server misconfiguration: GROQ_API_KEY is not set' }), {
@@ -217,6 +217,10 @@ async function callGroqForJson(prompt) {
     });
   }
 
+  if (typeof postProcess === 'function') {
+    postProcess(parsed);
+  }
+
   return new Response(JSON.stringify(parsed), {
     status: 200,
     headers: { 'Content-Type': 'application/json' }
@@ -271,7 +275,15 @@ async function handleStockAnalysis(ticker, companyName) {
       metrics: [],
       industryComparison: [],
       costCuts: [{ title: 'Ticker not recognized', desc: 'Verify the ticker symbol is correct and listed on a major exchange.', color: 'red' }],
-      isPublicStock: true
+      isPublicStock: true,
+      stockAnalysis: {
+        valuation: { verdict: 'Unknown', detail: 'No market data available for this ticker.', color: 'red' },
+        momentum: { trend: 'Unknown', detail: 'No market data available for this ticker.', color: 'red' },
+        dividend: { paysDividend: false, yield: 'Unknown', detail: 'No market data available for this ticker.' },
+        signal: 'Sell',
+        safetyScore: 0,
+        verdict: 'Ticker not recognized — cannot assess as an investment.'
+      }
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -309,8 +321,29 @@ async function handleStockAnalysis(ticker, companyName) {
   const roe = roeRaw ? `${roeRaw.toFixed(1)}%` : 'Unknown';
   const currentRatio = m['currentRatioAnnual'] ? m['currentRatioAnnual'].toFixed(2) : 'Unknown';
   const beta = m['beta'] ? m['beta'].toFixed(2) : 'Unknown';
-  const high52 = m['52WeekHigh'] ? `$${m['52WeekHigh'].toFixed(2)}` : 'Unknown';
-  const low52 = m['52WeekLow'] ? `$${m['52WeekLow'].toFixed(2)}` : 'Unknown';
+  const high52Raw = m['52WeekHigh'] || null;
+  const low52Raw = m['52WeekLow'] || null;
+  const high52 = high52Raw ? `$${high52Raw.toFixed(2)}` : 'Unknown';
+  const low52 = low52Raw ? `$${low52Raw.toFixed(2)}` : 'Unknown';
+
+  // Valuation multiples — pulled from the same metrics endpoint, no extra API call needed
+  const pbRatio = m['pbAnnual'] ? m['pbAnnual'].toFixed(2) : 'Unknown';
+  const psRatio = m['psAnnual'] ? m['psAnnual'].toFixed(2) : 'Unknown';
+
+  // Dividend data — pulled from the same metrics endpoint, no extra API call needed
+  const dividendYieldRaw = m['dividendYieldIndicatedAnnual'] || m['currentDividendYieldTTM'] || null;
+  const dividendPerShareRaw = m['dividendPerShareAnnual'] || null;
+  const paysDividend = !!(dividendYieldRaw || dividendPerShareRaw);
+  const dividendYield = dividendYieldRaw ? `${dividendYieldRaw.toFixed(2)}%` : 'None';
+  const dividendPerShare = dividendPerShareRaw ? `$${dividendPerShareRaw.toFixed(2)}` : 'None';
+
+  // Where the current price sits within its 52-week range, computed directly (not left to the AI)
+  const rangePosition = (rawPrice && high52Raw && low52Raw && high52Raw > low52Raw)
+    ? Math.round(((rawPrice - low52Raw) / (high52Raw - low52Raw)) * 100)
+    : null;
+  const rangePositionNote = rangePosition !== null
+    ? `${rangePosition}% of the way from its 52-week low to its 52-week high`
+    : 'Unknown';
 
   const dataBlock = `
 LIVE MARKET DATA (pulled from Finnhub):
@@ -328,15 +361,23 @@ Price Change: ${priceChange}
 52-Week High: ${high52}
 52-Week Low: ${low52}
 52-Week Price Return: ${yearReturn}
+Position in 52-Week Range: ${rangePositionNote}
 
 Key Financial Metrics (annual):
 - P/E Ratio: ${peRatio} (note: compare against ${industry} sector norms, not the broad market average)
+- Price/Book Ratio: ${pbRatio}
+- Price/Sales Ratio: ${psRatio}
 - EPS (Earnings Per Share): ${eps}
 - Net Profit Margin: ${profitMargin}
 - Debt/Equity Ratio: ${debtEquity}
 - Return on Equity (ROE): ${roe}
 - Current Ratio: ${currentRatio}
 - Beta (volatility vs market): ${beta}
+
+Dividend Data:
+- Pays a Dividend: ${paysDividend ? 'Yes' : 'No'}
+- Dividend Yield: ${dividendYield}
+- Dividend Per Share (annual): ${dividendPerShare}
 `.trim();
 
   const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares. Be balanced and accurate — neither overly optimistic nor pessimistic.
@@ -375,13 +416,44 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
     { "title": "<3rd risk or positive factor worth noting>", "desc": "<explanation>", "color": "red"|"amb"|"grn" }
   ],
   "isPublicStock": true,
-  "dataSource": "Live data via Finnhub"
+  "dataSource": "Live data via Finnhub",
+  "stockAnalysis": {
+    "valuation": {
+      "verdict": <"Cheap" | "Fair" | "Expensive">,
+      "detail": "<1-2 sentences on whether the P/E of ${peRatio} (and Price/Book of ${pbRatio}, Price/Sales of ${psRatio} if useful) looks cheap or expensive specifically vs typical ${industry} peers>",
+      "color": "grn"|"amb"|"red"
+    },
+    "momentum": {
+      "trend": "<short phrase, e.g. 'Near 52-week high' | 'Mid-range' | 'Near 52-week low'>",
+      "detail": "<1-2 sentences on the 52-week return of ${yearReturn} and where the price sits in its 52-week range (${rangePositionNote}, between low ${low52} and high ${high52})>",
+      "color": "grn"|"amb"|"red"
+    },
+    "dividend": {
+      "paysDividend": ${paysDividend},
+      "yield": "${dividendYield}",
+      "detail": "<if paysDividend is true, 1 sentence on whether the ${dividendYield} yield is attractive/sustainable for this sector; if false, 1 short sentence noting the company does not pay a dividend and whether that's a concern or normal (e.g. growth-stage reinvestment)>"
+    },
+    "signal": <"Buy" | "Hold" | "Sell", your recommendation combining valuation and momentum>,
+    "safetyScore": <integer 0-100 — a score SEPARATE from the business health score above. This measures how attractive the STOCK is as an investment AT ITS CURRENT PRICE right now (valuation + momentum + dividend), not the underlying business quality. 0-40 means Sell, 41-65 means Hold, 66-100 means Buy>,
+    "verdict": "<one punchy sentence combining business quality with current stock attractiveness, e.g. 'Strong business but the stock looks overvalued right now' or 'Solid business trading at a fair price with room to grow'>"
+  }
 }
 
 Rules:
 - Be sector-calibrated. A well-known S&P 500 company with strong margins and positive EPS should NOT score below 60 without genuinely serious risk factors.
 - Use the actual numbers provided — do not invent figures.
+- "stockAnalysis.safetyScore" is independent from the top-level "score" — a company can have a healthy business (high "score") but an unattractive stock price (low "safetyScore") if it looks overvalued, and vice versa.
 - Return ONLY the JSON object.`;
 
-  return await callGroqForJson(prompt);
+  return await callGroqForJson(prompt, (parsed) => {
+    if (!parsed || typeof parsed !== 'object') return;
+    if (!parsed.stockAnalysis || typeof parsed.stockAnalysis !== 'object') parsed.stockAnalysis = {};
+    const sa = parsed.stockAnalysis;
+    let safetyScore = Number(sa.safetyScore);
+    if (!Number.isFinite(safetyScore)) safetyScore = 50;
+    safetyScore = Math.max(0, Math.min(100, Math.round(safetyScore)));
+    sa.safetyScore = safetyScore;
+    // Signal is derived from the score deterministically so it always matches the 0-40/41-65/66-100 bands.
+    sa.signal = safetyScore >= 66 ? 'Buy' : safetyScore >= 41 ? 'Hold' : 'Sell';
+  });
 }

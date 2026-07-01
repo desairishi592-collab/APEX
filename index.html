@@ -116,6 +116,16 @@
     .dr-label { color: var(--muted); } .dr-val { font-weight: 500; color: var(--text); }
     .dr-val.red { color: var(--red); } .dr-val.grn { color: var(--green); } .dr-val.amb { color: var(--amber); }
 
+    /* STOCK ANALYSIS */
+    .dive-row-block { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .dive-row-block:last-child { border-bottom: none; }
+    .drb-head { display: flex; justify-content: space-between; align-items: center; }
+    .drb-detail { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 4px; }
+    .signal-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .signal-badge.buy { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
+    .signal-badge.hold { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
+    .signal-badge.sell { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -426,6 +436,22 @@
       </div>
     </div>
 
+    <!-- STOCK ONLY: separate stock safety score (Buy/Hold/Sell), independent of business health score above -->
+    <div class="score-card" id="r-stock-score-card" style="display:none;">
+      <div class="score-ring-wrap">
+        <canvas id="stock-score-canvas" width="96" height="96"></canvas>
+        <div class="score-center">
+          <span class="score-num" id="r-stock-score">—</span>
+          <span class="score-denom">/100</span>
+        </div>
+      </div>
+      <div class="score-detail">
+        <h3>Stock safety score</h3>
+        <p id="r-stock-verdict">—</p>
+        <span class="signal-badge" id="r-stock-signal">—</span>
+      </div>
+    </div>
+
     <!-- FREE: top headline, always visible — wording depends on mode -->
     <div class="card" id="r-top-cut" style="background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display:flex; gap:12px; align-items:flex-start;">
       <div class="insight-ico ico-warn" id="r-top-cut-ico">✂️</div>
@@ -454,6 +480,14 @@
       <div class="dive-body">
         <div class="section-title" id="r-pay-title">Employee pay benchmark</div>
         <div id="r-pay-rows"></div>
+      </div>
+    </div>
+
+    <!-- STOCK ONLY: valuation, momentum, dividend, buy/hold/sell signal, investor verdict -->
+    <div class="dive-card" id="r-stock-analysis-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Stock analysis</div>
+        <div id="r-stock-analysis-rows"></div>
       </div>
     </div>
 
@@ -1165,7 +1199,7 @@
     document.getElementById('r-status').textContent = (scanMode === 'investor' ? 'Safety: ' : 'Health: ') + d.status;
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
-    drawRing(d.score);
+    drawRing('score-canvas', d.score, 70, 45);
 
     const guestNotice = document.getElementById('guest-notice');
     if (guestNotice) {
@@ -1200,6 +1234,53 @@
             <span class="dr-label">${r.role}</span>
             <span class="dr-val ${r.color || ''}">${r.value}</span>
           </div>`).join('') || '<div class="dive-row"><span class="dr-label">No role data available</span></div>';
+      }
+    }
+
+    // STOCK ONLY: dedicated stock analysis section (valuation, momentum, dividend, buy/hold/sell)
+    const stockScoreCard = document.getElementById('r-stock-score-card');
+    const stockAnalysisCard = document.getElementById('r-stock-analysis-card');
+    if (stockScoreCard && stockAnalysisCard) {
+      if (d.isPublicStock && d.stockAnalysis) {
+        const sa = d.stockAnalysis;
+        stockScoreCard.style.display = 'flex';
+        stockAnalysisCard.style.display = 'block';
+
+        document.getElementById('r-stock-score').textContent = sa.safetyScore;
+        document.getElementById('r-stock-verdict').textContent = sa.verdict || '—';
+        const signalLower = (sa.signal || '').toLowerCase();
+        const signalEl = document.getElementById('r-stock-signal');
+        signalEl.textContent = sa.signal || '—';
+        signalEl.className = 'signal-badge ' + (signalLower === 'buy' ? 'buy' : signalLower === 'sell' ? 'sell' : 'hold');
+        drawRing('stock-score-canvas', sa.safetyScore, 66, 41);
+
+        const rowsEl = document.getElementById('r-stock-analysis-rows');
+        const rows = [];
+        if (sa.valuation) {
+          rows.push({ label: 'Valuation', value: sa.valuation.verdict, detail: sa.valuation.detail, color: sa.valuation.color });
+        }
+        if (sa.momentum) {
+          rows.push({ label: 'Price momentum', value: sa.momentum.trend, detail: sa.momentum.detail, color: sa.momentum.color });
+        }
+        if (sa.dividend) {
+          rows.push({
+            label: 'Dividend',
+            value: sa.dividend.paysDividend ? sa.dividend.yield : 'None',
+            detail: sa.dividend.detail,
+            color: sa.dividend.paysDividend ? 'grn' : ''
+          });
+        }
+        rowsEl.innerHTML = rows.map(r => `
+          <div class="dive-row-block">
+            <div class="drb-head">
+              <span class="dr-label">${r.label}</span>
+              <span class="dr-val ${r.color || ''}">${r.value || '—'}</span>
+            </div>
+            <div class="drb-detail">${r.detail || ''}</div>
+          </div>`).join('') || '<div class="dive-row-block">No stock analysis available</div>';
+      } else {
+        stockScoreCard.style.display = 'none';
+        stockAnalysisCard.style.display = 'none';
       }
     }
 
@@ -1240,14 +1321,15 @@
     window.print();
   }
 
-  function drawRing(score) {
-    const c = document.getElementById('score-canvas');
+  function drawRing(canvasId, score, greenMin, amberMin) {
+    const c = document.getElementById(canvasId);
+    if (!c) return;
     const ctx = c.getContext('2d');
     const cx = 48, cy = 48, r = 40;
     ctx.clearRect(0, 0, 96, 96);
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
     ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 6; ctx.stroke();
-    const color = score >= 70 ? '#22c55e' : score >= 45 ? '#f59e0b' : '#ef4444';
+    const color = score >= greenMin ? '#22c55e' : score >= amberMin ? '#f59e0b' : '#ef4444';
     ctx.beginPath();
     ctx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + (score/100)*Math.PI*2);
     ctx.strokeStyle = color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
