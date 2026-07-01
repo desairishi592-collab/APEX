@@ -65,7 +65,7 @@ export default async function handler(req) {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      return await handleStockAnalysis(stockTicker, stockCompanyName);
+      return await handleStockAnalysis(stockTicker, stockCompanyName, body.debug === true);
     }
 
     // ── PRIVATE BUSINESS PATH (owner or investor evaluating a private business) ──
@@ -294,7 +294,7 @@ async function callGroqForJson(prompt, postProcess) {
 // ── PUBLIC STOCK ANALYSIS ──
 // Pulls real financials from Finnhub first, then feeds them into the AI prompt.
 // This means the analysis is grounded in actual current data, not AI memory.
-async function handleStockAnalysis(ticker, companyName) {
+async function handleStockAnalysis(ticker, companyName, debug = false) {
   const finnhubKey = process.env.FINNHUB_API_KEY;
   const symbol = ticker.toUpperCase();
 
@@ -515,6 +515,33 @@ Insider Trading Activity (recent open-market buys/sells by executives and direct
 - ${insiderNote}
 - Computed sentiment: ${insiderSentiment}
 `.trim();
+
+  // DEBUG MODE: bypass the AI entirely and dump exactly what we extracted from Finnhub,
+  // plus the full raw metric object, so we can see precisely where differentiation breaks
+  // down between tickers without guessing. Remove once the score bug is confirmed fixed.
+  if (debug) {
+    return new Response(JSON.stringify({
+      debug: true,
+      ticker: symbol,
+      companyName: companyDisplay,
+      industry,
+      rawMetricKeyCount: Object.keys(m).length,
+      rawMetricKeys: Object.keys(m).sort(),
+      rawMetric: m,
+      rawProfile: profile,
+      rawQuote: quote,
+      extractedValues: {
+        peRaw, epsRaw, yearReturnRaw, profitMarginRaw, debtEquityRaw, roeRaw,
+        currentRatioRaw, betaRaw, high52Raw, low52Raw, pbRaw, psRaw,
+        dividendYieldRaw, dividendPerShareRaw, rawPrice, rangePosition
+      },
+      formattedValues: {
+        peRatio, eps, yearReturn, profitMargin, debtEquity, roe, currentRatio,
+        beta, high52, low52, pbRatio, psRatio, currentPrice, industry, marketCap
+      },
+      dataBlock
+    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
 
   const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares. Be balanced and accurate — neither overly optimistic nor pessimistic.
 
