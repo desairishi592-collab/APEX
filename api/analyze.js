@@ -5,6 +5,41 @@ function parseMoney(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Deterministic 0-100 "quality score" computed directly from real Finnhub numbers.
+// The AI's own top-level score compresses toward a narrow "healthy" band (e.g. a
+// mega-cap tech company with 147% ROE and an energy major with 10% ROE both landing
+// on 85) because it isn't weighing the MAGNITUDE of a difference, just recognizing
+// "this looks fine". Blending in a formula grounded in the actual metrics forces real
+// separation between companies instead of trusting the LLM's calibration alone.
+function computeDeterministicQualityScore({ profitMarginRaw, roeRaw, debtEquityRaw, betaRaw, yearReturnRaw }) {
+  const parts = [];
+  if (profitMarginRaw != null) {
+    const v = profitMarginRaw <= 0 ? Math.max(0, 30 + profitMarginRaw * 2) : Math.min(100, (profitMarginRaw / 30) * 100);
+    parts.push({ v, w: 0.25 });
+  }
+  if (roeRaw != null) {
+    const v = roeRaw <= 0 ? Math.max(0, 20 + roeRaw) : Math.min(100, 40 + (roeRaw / 30) * 60);
+    parts.push({ v, w: 0.25 });
+  }
+  if (debtEquityRaw != null) {
+    // Weighted lightly since "normal" leverage varies a lot by sector (e.g. banks run high D/E by design)
+    const v = Math.max(0, 100 - debtEquityRaw * 35);
+    parts.push({ v, w: 0.15 });
+  }
+  if (betaRaw != null) {
+    const v = betaRaw <= 1.3 ? 80 : Math.max(20, 80 - (betaRaw - 1.3) * 25);
+    parts.push({ v, w: 0.10 });
+  }
+  if (yearReturnRaw != null) {
+    const v = Math.max(0, Math.min(100, 50 + yearReturnRaw * 1.2));
+    parts.push({ v, w: 0.25 });
+  }
+  if (!parts.length) return null;
+  const totalWeight = parts.reduce((sum, p) => sum + p.w, 0);
+  const weighted = parts.reduce((sum, p) => sum + p.v * p.w, 0);
+  return Math.round(weighted / totalWeight);
+}
+
 // Guards against the AI returning a non-numeric or out-of-range percentile.
 function clampIndustryPercentiles(parsed) {
   if (!parsed || !Array.isArray(parsed.industryComparison)) return;
@@ -65,7 +100,7 @@ export default async function handler(req) {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      return await handleStockAnalysis(stockTicker, stockCompanyName, body.debug === true);
+      return await handleStockAnalysis(stockTicker, stockCompanyName);
     }
 
     // ── PRIVATE BUSINESS PATH (owner or investor evaluating a private business) ──
@@ -294,7 +329,7 @@ async function callGroqForJson(prompt, postProcess) {
 // ── PUBLIC STOCK ANALYSIS ──
 // Pulls real financials from Finnhub first, then feeds them into the AI prompt.
 // This means the analysis is grounded in actual current data, not AI memory.
-async function handleStockAnalysis(ticker, companyName, debug = false) {
+async function handleStockAnalysis(ticker, companyName) {
   const finnhubKey = process.env.FINNHUB_API_KEY;
   const symbol = ticker.toUpperCase();
 
@@ -516,33 +551,6 @@ Insider Trading Activity (recent open-market buys/sells by executives and direct
 - Computed sentiment: ${insiderSentiment}
 `.trim();
 
-  // DEBUG MODE: bypass the AI entirely and dump exactly what we extracted from Finnhub,
-  // plus the full raw metric object, so we can see precisely where differentiation breaks
-  // down between tickers without guessing. Remove once the score bug is confirmed fixed.
-  if (debug) {
-    return new Response(JSON.stringify({
-      debug: true,
-      ticker: symbol,
-      companyName: companyDisplay,
-      industry,
-      rawMetricKeyCount: Object.keys(m).length,
-      rawMetricKeys: Object.keys(m).sort(),
-      rawMetric: m,
-      rawProfile: profile,
-      rawQuote: quote,
-      extractedValues: {
-        peRaw, epsRaw, yearReturnRaw, profitMarginRaw, debtEquityRaw, roeRaw,
-        currentRatioRaw, betaRaw, high52Raw, low52Raw, pbRaw, psRaw,
-        dividendYieldRaw, dividendPerShareRaw, rawPrice, rangePosition
-      },
-      formattedValues: {
-        peRatio, eps, yearReturn, profitMargin, debtEquity, roe, currentRatio,
-        beta, high52, low52, pbRatio, psRatio, currentPrice, industry, marketCap
-      },
-      dataBlock
-    }, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
   const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares. Be balanced and accurate — neither overly optimistic nor pessimistic.
 
 CRITICAL INSTRUCTION: Always evaluate metrics relative to the company's specific INDUSTRY and SECTOR, not against generic market averages. For example:
@@ -618,10 +626,19 @@ Rules:
     if (!parsed || typeof parsed !== 'object') return;
     clampIndustryPercentiles(parsed);
 
-    // Deterministic ceiling on the top-level score: real distress signals cap it regardless
-    // of what the AI says, so an objectively struggling company can't cluster with a healthy one.
+    // Blend the AI's score with a deterministic quality score computed from the real
+    // numbers, so two companies with genuinely different fundamentals can't land on
+    // the same or near-identical score just because the AI's calibration compresses
+    // "healthy" companies toward a narrow band.
     let score = Number(parsed.score);
     if (!Number.isFinite(score)) score = 50;
+    const qualityScore = computeDeterministicQualityScore({ profitMarginRaw, roeRaw, debtEquityRaw, betaRaw, yearReturnRaw });
+    if (qualityScore != null) {
+      score = Math.round((score + qualityScore) / 2);
+    }
+
+    // Deterministic ceiling on the top-level score: real distress signals cap it regardless
+    // of what the AI says, so an objectively struggling company can't cluster with a healthy one.
     let scoreCeiling = 100;
     if (yearReturnRaw != null && yearReturnRaw <= -50) scoreCeiling = Math.min(scoreCeiling, 30);
     else if (yearReturnRaw != null && yearReturnRaw <= -25) scoreCeiling = Math.min(scoreCeiling, 50);
