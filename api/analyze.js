@@ -241,22 +241,24 @@ async function handleStockAnalysis(ticker, companyName) {
     });
   }
 
-  // Fetch real data from Finnhub in parallel — quote, company profile, and financials
-  let quote = null, profile = null, financials = null, metrics = null;
+  // Fetch real data from Finnhub in parallel — quote, company profile, financials, and insider activity
+  let quote = null, profile = null, financials = null, metrics = null, insiderTx = null;
 
   try {
-    const [quoteRes, profileRes, financialsRes, metricsRes] = await Promise.all([
+    const [quoteRes, profileRes, financialsRes, metricsRes, insiderRes] = await Promise.all([
       fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`),
       fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${finnhubKey}`),
       fetch(`https://finnhub.io/api/v1/financials/reported?symbol=${symbol}&freq=annual&token=${finnhubKey}`),
-      fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${finnhubKey}`)
+      fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${finnhubKey}`),
+      fetch(`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${symbol}&token=${finnhubKey}`)
     ]);
 
-    [quote, profile, financials, metrics] = await Promise.all([
+    [quote, profile, financials, metrics, insiderTx] = await Promise.all([
       quoteRes.ok ? quoteRes.json() : null,
       profileRes.ok ? profileRes.json() : null,
       financialsRes.ok ? financialsRes.json() : null,
-      metricsRes.ok ? metricsRes.json() : null
+      metricsRes.ok ? metricsRes.json() : null,
+      insiderRes.ok ? insiderRes.json() : null
     ]);
   } catch (fetchErr) {
     return new Response(JSON.stringify({ error: 'Could not reach market data provider', detail: fetchErr.message }), {
@@ -283,6 +285,14 @@ async function handleStockAnalysis(ticker, companyName) {
         signal: 'Sell',
         safetyScore: 0,
         verdict: 'Ticker not recognized — cannot assess as an investment.'
+      },
+      insiderSentiment: {
+        sentiment: 'No Data',
+        summary: 'No market data available for this ticker.',
+        netShares: 0,
+        buyCount: 0,
+        sellCount: 0,
+        recentTransactions: []
       }
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
@@ -345,6 +355,45 @@ async function handleStockAnalysis(ticker, companyName) {
     ? `${rangePosition}% of the way from its 52-week low to its 52-week high`
     : 'Unknown';
 
+  // Insider sentiment — computed directly from raw transaction records (not left to the AI),
+  // limited to open-market buys ('P') and sells ('S') so option grants/gifts don't skew the signal.
+  const insiderRecords = (insiderTx?.data || [])
+    .filter(t => t.transactionCode === 'P' || t.transactionCode === 'S')
+    .sort((a, b) => new Date(b.transactionDate) - new Date(a.transactionDate));
+
+  let insiderNetShares = 0, insiderBuyValue = 0, insiderSellValue = 0, insiderBuyCount = 0, insiderSellCount = 0;
+  insiderRecords.forEach(t => {
+    const shares = Math.abs(t.change || t.share || 0);
+    const value = shares * (t.transactionPrice || 0);
+    if (t.transactionCode === 'P') {
+      insiderNetShares += shares;
+      insiderBuyValue += value;
+      insiderBuyCount += 1;
+    } else {
+      insiderNetShares -= shares;
+      insiderSellValue += value;
+      insiderSellCount += 1;
+    }
+  });
+
+  const insiderSentiment = insiderRecords.length === 0
+    ? 'No Data'
+    : insiderBuyValue > insiderSellValue * 1.2 ? 'Bullish'
+    : insiderSellValue > insiderBuyValue * 1.2 ? 'Bearish'
+    : 'Neutral';
+
+  const insiderRecentTransactions = insiderRecords.slice(0, 5).map(t => ({
+    name: t.name || 'Unknown insider',
+    type: t.transactionCode === 'P' ? 'Buy' : 'Sell',
+    shares: Math.abs(t.change || t.share || 0).toLocaleString(),
+    value: t.transactionPrice ? `$${Math.round(Math.abs(t.change || t.share || 0) * t.transactionPrice).toLocaleString()}` : 'Unknown',
+    date: t.transactionDate || 'Unknown'
+  }));
+
+  const insiderNote = insiderRecords.length === 0
+    ? 'No recent open-market insider buy/sell transactions on record.'
+    : `${insiderBuyCount} open-market buy(s) totaling ~$${Math.round(insiderBuyValue).toLocaleString()} vs. ${insiderSellCount} open-market sell(s) totaling ~$${Math.round(insiderSellValue).toLocaleString()} in the most recent filings.`;
+
   const dataBlock = `
 LIVE MARKET DATA (pulled from Finnhub):
 Company: ${companyDisplay}
@@ -378,6 +427,10 @@ Dividend Data:
 - Pays a Dividend: ${paysDividend ? 'Yes' : 'No'}
 - Dividend Yield: ${dividendYield}
 - Dividend Per Share (annual): ${dividendPerShare}
+
+Insider Trading Activity (recent open-market buys/sells by executives and directors):
+- ${insiderNote}
+- Computed sentiment: ${insiderSentiment}
 `.trim();
 
   const prompt = `You are a financial due-diligence analyst helping a retail investor decide whether to buy stock in a public company. The person reading this report is deciding whether to buy shares. Be balanced and accurate — neither overly optimistic nor pessimistic.
@@ -436,6 +489,9 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
     "signal": <"Buy" | "Hold" | "Sell", your recommendation combining valuation and momentum>,
     "safetyScore": <integer 0-100 — a score SEPARATE from the business health score above. This measures how attractive the STOCK is as an investment AT ITS CURRENT PRICE right now (valuation + momentum + dividend), not the underlying business quality. 0-40 means Sell, 41-65 means Hold, 66-100 means Buy>,
     "verdict": "<one punchy sentence combining business quality with current stock attractiveness, e.g. 'Strong business but the stock looks overvalued right now' or 'Solid business trading at a fair price with room to grow'>"
+  },
+  "insiderSentiment": {
+    "summary": "<1-2 sentences interpreting what the insider buying/selling activity (${insiderNote}) suggests about executive confidence — do not restate the raw numbers, interpret them>"
   }
 }
 
@@ -443,6 +499,7 @@ Rules:
 - Be sector-calibrated. A well-known S&P 500 company with strong margins and positive EPS should NOT score below 60 without genuinely serious risk factors.
 - Use the actual numbers provided — do not invent figures.
 - "stockAnalysis.safetyScore" is independent from the top-level "score" — a company can have a healthy business (high "score") but an unattractive stock price (low "safetyScore") if it looks overvalued, and vice versa.
+- If there is no recent insider activity, say so plainly rather than speculating.
 - Return ONLY the JSON object.`;
 
   return await callGroqForJson(prompt, (parsed) => {
@@ -455,5 +512,19 @@ Rules:
     sa.safetyScore = safetyScore;
     // Signal is derived from the score deterministically so it always matches the 0-40/41-65/66-100 bands.
     sa.signal = safetyScore >= 66 ? 'Buy' : safetyScore >= 41 ? 'Hold' : 'Sell';
+
+    // Insider sentiment figures are computed directly from Finnhub data, not left to the AI —
+    // only the narrative "summary" field comes from Groq.
+    if (!parsed.insiderSentiment || typeof parsed.insiderSentiment !== 'object') parsed.insiderSentiment = {};
+    parsed.insiderSentiment.sentiment = insiderSentiment;
+    parsed.insiderSentiment.netShares = insiderNetShares;
+    parsed.insiderSentiment.buyCount = insiderBuyCount;
+    parsed.insiderSentiment.sellCount = insiderSellCount;
+    parsed.insiderSentiment.recentTransactions = insiderRecentTransactions;
+    if (typeof parsed.insiderSentiment.summary !== 'string') {
+      parsed.insiderSentiment.summary = insiderRecords.length === 0
+        ? 'No recent open-market insider transactions to analyze.'
+        : `Insiders have been net ${insiderSentiment === 'Bullish' ? 'buying' : insiderSentiment === 'Bearish' ? 'selling' : 'mixed'} recently.`;
+    }
   });
 }

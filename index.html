@@ -136,6 +136,8 @@
     .signal-badge.buy { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
     .signal-badge.hold { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
     .signal-badge.sell { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+    .signal-badge.neutral { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
+    .signal-badge.nodata { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
 
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
@@ -502,6 +504,19 @@
       <div class="dive-body">
         <div class="section-title">Stock analysis</div>
         <div id="r-stock-analysis-rows"></div>
+      </div>
+    </div>
+
+    <!-- STOCK ONLY: recent insider (executive/director) buying vs. selling activity -->
+    <div class="dive-card" id="r-insider-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Insider sentiment</div>
+        <div class="drb-head" style="margin-bottom:8px;">
+          <span class="dr-label">Recent executive activity</span>
+          <span class="signal-badge" id="r-insider-badge">—</span>
+        </div>
+        <div class="drb-detail" id="r-insider-summary" style="margin-bottom:10px;">—</div>
+        <div id="r-insider-transactions"></div>
       </div>
     </div>
 
@@ -1356,6 +1371,34 @@
       } else {
         stockScoreCard.style.display = 'none';
         stockAnalysisCard.style.display = 'none';
+      }
+    }
+
+    // STOCK ONLY: insider (executive/director) sentiment
+    const insiderCard = document.getElementById('r-insider-card');
+    if (insiderCard) {
+      if (d.isPublicStock && d.insiderSentiment) {
+        const ins = d.insiderSentiment;
+        insiderCard.style.display = 'block';
+
+        const sentimentLower = (ins.sentiment || '').toLowerCase();
+        const badgeClass = sentimentLower === 'bullish' ? 'buy' : sentimentLower === 'bearish' ? 'sell'
+          : sentimentLower === 'neutral' ? 'neutral' : 'nodata';
+        const badgeEl = document.getElementById('r-insider-badge');
+        badgeEl.textContent = ins.sentiment || 'No Data';
+        badgeEl.className = 'signal-badge ' + badgeClass;
+
+        document.getElementById('r-insider-summary').textContent = ins.summary || '—';
+
+        const txEl = document.getElementById('r-insider-transactions');
+        const transactions = ins.recentTransactions || [];
+        txEl.innerHTML = transactions.map(t => `
+          <div class="dive-row">
+            <span class="dr-label">${t.name} · ${t.date}</span>
+            <span class="dr-val ${t.type === 'Buy' ? 'grn' : 'red'}">${t.type} ${t.shares} sh (${t.value})</span>
+          </div>`).join('') || '<div class="dive-row"><span class="dr-label">No recent insider transactions</span></div>';
+      } else {
+        insiderCard.style.display = 'none';
       }
     }
 
