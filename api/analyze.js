@@ -1,5 +1,7 @@
 export const config = { runtime: 'edge' };
 
+import { computeRedFlags } from '../lib/redFlags.js';
+
 function parseMoney(value) {
   const n = parseFloat(String(value).replace(/[^0-9.-]/g, ''));
   return Number.isFinite(n) ? n : null;
@@ -760,5 +762,10 @@ Rules:
 
     // Competitor cards — fetched directly from Finnhub, not left to the AI.
     parsed.competitors = competitors;
+
+    // Red flag alerts — deterministic threshold checks against data already fetched above,
+    // not left to the AI. Always an array (possibly empty) so the frontend can distinguish
+    // "checked, all clear" from "this scan predates the feature".
+    parsed.redFlags = computeRedFlags({ metricsResponse: metrics, debtToEquity: debtEquityRaw, currentRatio: currentRatioRaw, insiderRecords });
   });
 }

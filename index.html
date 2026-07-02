@@ -251,6 +251,19 @@
     .risk-timeline-risk { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; overflow-wrap: break-word; word-break: break-word; }
     .risk-timeline-detail { font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: break-word; word-break: break-word; }
 
+    /* RED FLAGS */
+    .red-flag-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .red-flag-row:last-child { border-bottom: none; }
+    .red-flag-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 6px; }
+    .red-flag-name { font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: break-word; word-break: break-word; }
+    .severity-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    .severity-badge.high { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+    .severity-badge.medium { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+    .severity-badge.low { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+    .red-flag-explanation { font-size: 13px; color: var(--text); line-height: 1.5; margin-bottom: 4px; overflow-wrap: break-word; word-break: break-word; }
+    .red-flag-value { font-size: 11px; color: var(--muted); font-family: 'Space Grotesk', sans-serif; }
+    .red-flags-clear { display: flex; align-items: center; gap: 10px; color: var(--green); font-size: 14px; font-weight: 500; padding: 4px 0; }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -730,6 +743,14 @@
         </div>
         <div class="drb-detail" id="r-insider-summary" style="margin-bottom:10px;">—</div>
         <div id="r-insider-transactions"></div>
+      </div>
+    </div>
+
+    <!-- STOCK ONLY: red flag alerts — deterministic threshold checks, computed fresh every scan -->
+    <div class="dive-card" id="r-red-flags-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Red flags</div>
+        <div id="r-red-flags-rows"></div>
       </div>
     </div>
 
@@ -2234,6 +2255,36 @@
           </div>`).join('') || '<div class="dive-row"><span class="dr-label">No recent insider transactions</span></div>';
       } else {
         insiderCard.style.display = 'none';
+      }
+    }
+
+    // STOCK ONLY: red flag alerts — deterministic threshold checks, computed fresh every scan.
+    // d.redFlags is always an array once a stock scan has run this feature (even if empty, meaning
+    // "checked, all clear") — undefined means this scan predates the feature or isn't a stock scan.
+    const redFlagsCard = document.getElementById('r-red-flags-card');
+    const redFlagsRows = document.getElementById('r-red-flags-rows');
+    if (redFlagsCard && redFlagsRows) {
+      if (d.isPublicStock && Array.isArray(d.redFlags)) {
+        redFlagsCard.style.display = 'block';
+        if (d.redFlags.length === 0) {
+          redFlagsRows.innerHTML = `<div class="red-flags-clear">✓ No red flags detected</div>`;
+        } else {
+          redFlagsRows.innerHTML = d.redFlags.map(f => {
+            const severity = ['high', 'medium', 'low'].includes(f.severity) ? f.severity : 'medium';
+            return `
+              <div class="red-flag-row">
+                <div class="red-flag-head">
+                  <span class="red-flag-name">${escapeHtml(f.name || '')}</span>
+                  <span class="severity-badge ${severity}">${severity}</span>
+                </div>
+                <div class="red-flag-explanation">${escapeHtml(f.explanation || '')}</div>
+                <div class="red-flag-value">${escapeHtml(f.value || '')}</div>
+              </div>`;
+          }).join('');
+        }
+      } else {
+        redFlagsCard.style.display = 'none';
+        redFlagsRows.innerHTML = '';
       }
     }
 
