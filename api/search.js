@@ -1,5 +1,7 @@
 export const config = { runtime: 'edge' };
 
+import { searchFinnhub } from '../lib/finnhubSearch.js';
+
 // These tickers are unambiguous and don't need live validation — skip the Finnhub
 // round-trip entirely to keep the default list cheap on API rate limits.
 const POPULAR_COMPANIES_STATIC = [
@@ -21,24 +23,6 @@ const POPULAR_COMPANIES_DYNAMIC = [
   { name: 'Toyota Motor', preferredSymbol: '7203.T' },
   { name: 'LVMH Moet Hennessy', preferredSymbol: 'MC.PA' }
 ];
-
-// Retries once on a 429 — a stock scan (quote + profile + metric + insider-transactions)
-// shares the same Finnhub rate-limit bucket as this search endpoint, so a search fired
-// right after a scan (e.g. opening "Compare with another stock") can get momentarily
-// throttled. A short backoff gives that per-minute window a chance to clear.
-async function searchFinnhub(query, finnhubKey, attempt = 1) {
-  const res = await fetch(`https://finnhub.io/api/v1/search?q=${encodeURIComponent(query)}&token=${finnhubKey}`);
-  if (res.status === 429 && attempt < 2) {
-    await new Promise(r => setTimeout(r, 400));
-    return searchFinnhub(query, finnhubKey, attempt + 1);
-  }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`Finnhub returned ${res.status}${detail ? `: ${detail}` : ''}`);
-  }
-  const data = await res.json();
-  return data?.result || [];
-}
 
 // Proxies Finnhub's symbol search so the API key stays server-side.
 export default async function handler(req) {

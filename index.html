@@ -455,6 +455,17 @@
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openWatchlist()" id="am-watchlist-btn">My Watchlist</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openAlerts()" id="am-alerts-btn">My Alerts</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
+
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">API Access</span>
+        <span id="am-api-key-status" style="font-size:11px; color:var(--dim);">—</span>
+      </div>
+      <div id="am-api-key-display" style="display:none; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 12px; margin-bottom:8px; font-family:'Space Grotesk',monospace; font-size:12px; word-break:break-all; color:var(--green);"></div>
+      <div id="am-api-key-warning" style="display:none; font-size:11px; color:var(--amber); margin-bottom:8px; line-height:1.5;">⚠ Copy this key now — it won't be shown again.</div>
+      <button class="btn-outline" style="width:100%;" onclick="generateApiKey()" id="am-api-key-btn">Generate API Key</button>
+    </div>
+
     <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
       <span style="font-size:11px; color: var(--dim);">Dev: preview Pro view</span>
       <button class="btn-outline" style="padding:5px 12px; font-size:11px;" onclick="togglePreviewPro()" id="preview-pro-btn">Off</button>
@@ -1159,6 +1170,65 @@
     document.getElementById('am-upgrade-btn').style.display = isPro ? 'none' : 'block';
     document.getElementById('preview-pro-btn').textContent = previewPro ? 'On' : 'Off';
     document.getElementById('account-overlay').classList.add('active');
+    document.getElementById('am-api-key-display').style.display = 'none';
+    document.getElementById('am-api-key-warning').style.display = 'none';
+    refreshApiKeyStatus();
+  }
+
+  // ── API ACCESS (account settings) ──
+  async function refreshApiKeyStatus() {
+    const statusEl = document.getElementById('am-api-key-status');
+    const btnEl = document.getElementById('am-api-key-btn');
+    if (!currentUser) return;
+    try {
+      const { data } = await sb.from('api_keys').select('key_prefix').eq('user_id', currentUser.id).maybeSingle();
+      if (data) {
+        statusEl.textContent = `Active — ${data.key_prefix}…`;
+        btnEl.textContent = 'Regenerate API Key';
+      } else {
+        statusEl.textContent = 'No key yet';
+        btnEl.textContent = 'Generate API Key';
+      }
+    } catch (e) {
+      statusEl.textContent = 'No key yet';
+      btnEl.textContent = 'Generate API Key';
+    }
+  }
+
+  async function generateApiKey() {
+    const btn = document.getElementById('am-api-key-btn');
+    const displayEl = document.getElementById('am-api-key-display');
+    const warningEl = document.getElementById('am-api-key-warning');
+
+    btn.disabled = true;
+    const prevText = btn.textContent;
+    btn.textContent = 'Generating…';
+    displayEl.style.display = 'none';
+    warningEl.style.display = 'none';
+
+    try {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('Not logged in');
+
+      const res = await fetch('/api/generate-api-key', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Could not generate key');
+
+      displayEl.textContent = data.apiKey;
+      displayEl.style.display = 'block';
+      warningEl.style.display = 'block';
+      await refreshApiKeyStatus();
+    } catch (e) {
+      displayEl.textContent = 'Could not generate key — please try again.';
+      displayEl.style.display = 'block';
+      btn.textContent = prevText;
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // Returns a human string like "118h" if still waiting, or null if the wait is over / not applicable
