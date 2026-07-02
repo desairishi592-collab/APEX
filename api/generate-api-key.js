@@ -50,17 +50,26 @@ export default async function handler(req) {
   const { rawKey, keyHash, keyPrefix } = await generateApiKey();
 
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/api_keys`, {
+    // Explicit delete-then-insert rather than relying on an upsert's conflict target —
+    // guarantees exactly one row per user (and that the old key stops working) even if the
+    // table's uniqueness constraint on user_id is ever missing or wrong.
+    const delRes = await fetch(`${SUPABASE_URL}/rest/v1/api_keys?user_id=eq.${user.id}`, {
+      method: 'DELETE',
+      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, Prefer: 'return=minimal' }
+    });
+    if (!delRes.ok) throw new Error(`Supabase delete failed: ${delRes.status}`);
+
+    const insRes = await fetch(`${SUPABASE_URL}/rest/v1/api_keys`, {
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
         Authorization: `Bearer ${serviceRoleKey}`,
         'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates,return=minimal'
+        Prefer: 'return=minimal'
       },
       body: JSON.stringify({ user_id: user.id, key_hash: keyHash, key_prefix: keyPrefix, created_at: new Date().toISOString() })
     });
-    if (!res.ok) throw new Error(`Supabase upsert failed: ${res.status}`);
+    if (!insRes.ok) throw new Error(`Supabase insert failed: ${insRes.status}`);
   } catch (e) {
     return new Response(JSON.stringify({ error: 'Could not save API key', detail: e.message }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
