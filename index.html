@@ -232,6 +232,25 @@
     .percentile-bar-fill.red { background: var(--red); }
     .percentile-summary { font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: break-word; word-break: break-word; }
 
+    /* RISK TIMELINE */
+    .risk-timeline { padding-left: 2px; }
+    .risk-timeline-item { position: relative; padding-left: 26px; padding-bottom: 22px; }
+    .risk-timeline-item:last-child { padding-bottom: 0; }
+    .risk-timeline-item::before {
+      content: ''; position: absolute; left: 0; top: 3px; width: 11px; height: 11px; border-radius: 50%;
+      background: var(--bg); box-shadow: 0 0 0 2px currentColor;
+    }
+    .risk-timeline-item::after {
+      content: ''; position: absolute; left: 5px; top: 15px; bottom: 0; width: 1px; background: var(--border);
+    }
+    .risk-timeline-item:last-child::after { display: none; }
+    .risk-timeline-item.red { color: var(--red); }
+    .risk-timeline-item.amb { color: var(--amber); }
+    .risk-timeline-item.grn { color: var(--green); }
+    .risk-timeline-timeframe { font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 12px; color: currentColor; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 3px; }
+    .risk-timeline-risk { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 3px; overflow-wrap: break-word; word-break: break-word; }
+    .risk-timeline-detail { font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: break-word; word-break: break-word; }
+
     .trend-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
     .trend-row:last-child { border-bottom: none; }
     .trend-date { color: var(--muted); }
@@ -749,6 +768,14 @@
       <div class="dive-body">
         <div class="section-title">How you compare to similar businesses</div>
         <div id="r-industry-rows"></div>
+      </div>
+    </div>
+
+    <!-- Risk timeline — when each identified risk becomes critical -->
+    <div class="dive-card" id="r-risk-timeline-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Risk timeline</div>
+        <div class="risk-timeline" id="r-risk-timeline-rows"></div>
       </div>
     </div>
 
@@ -2278,6 +2305,28 @@
             <div class="percentile-summary">${escapeHtml(r.summary || '')}</div>
           </div>`;
       }).join('') : '<div class="dive-row"><span class="dr-label">No comparison data available</span></div>';
+    }
+
+    // Risk timeline — when each identified risk becomes critical (owner, investor, and stock scans)
+    const riskTimelineCard = document.getElementById('r-risk-timeline-card');
+    const riskTimelineRows = document.getElementById('r-risk-timeline-rows');
+    if (riskTimelineCard && riskTimelineRows) {
+      const timeline = d.riskTimeline || [];
+      if (timeline.length) {
+        riskTimelineCard.style.display = 'block';
+        riskTimelineRows.innerHTML = timeline.map(item => {
+          const colorClass = item.severity === 'red' ? 'red' : item.severity === 'grn' ? 'grn' : 'amb';
+          return `
+            <div class="risk-timeline-item ${colorClass}">
+              <div class="risk-timeline-timeframe">${escapeHtml(item.timeframe || '')}</div>
+              <div class="risk-timeline-risk">${escapeHtml(item.risk || '')}</div>
+              <div class="risk-timeline-detail">${escapeHtml(item.detail || '')}</div>
+            </div>`;
+        }).join('');
+      } else {
+        riskTimelineCard.style.display = 'none';
+        riskTimelineRows.innerHTML = '';
+      }
     }
 
     // PRO: full cost-cutting / risk plan (all items, including the free top one)

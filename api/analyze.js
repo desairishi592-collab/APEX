@@ -83,6 +83,25 @@ function clampIndustryPercentiles(parsed) {
   });
 }
 
+// Normalizes the AI-generated risk timeline into a small, well-formed list — drops
+// malformed entries and caps severity to the same red/amb/grn vocabulary used elsewhere,
+// so a bad AI response degrades to "no timeline shown" rather than a broken render.
+function sanitizeRiskTimeline(parsed) {
+  if (!parsed || !Array.isArray(parsed.riskTimeline)) {
+    if (parsed) parsed.riskTimeline = [];
+    return;
+  }
+  parsed.riskTimeline = parsed.riskTimeline
+    .filter(item => item && typeof item === 'object' && item.risk && item.timeframe)
+    .slice(0, 4)
+    .map(item => ({
+      risk: String(item.risk).slice(0, 80),
+      timeframe: String(item.timeframe).slice(0, 40),
+      detail: typeof item.detail === 'string' ? item.detail.slice(0, 300) : '',
+      severity: ['red', 'amb', 'grn'].includes(item.severity) ? item.severity : 'amb'
+    }));
+}
+
 // Deterministic payroll ceiling — not left to the AI so the dollar figure is
 // reproducible and grounded in the actual numbers, not a language-model guess.
 // Combines two independent estimates and takes the more conservative (lower) one:
@@ -209,6 +228,12 @@ export default async function handler(req) {
       ? `"fixImpact": "<short phrase estimating how much the overall safety score could move if the #1 risk above (costCuts[0]) were resolved, e.g. '+10-15 points' or 'Could move from Moderate Risk to Safe'>"`
       : `"fixImpact": "<short phrase estimating how much the health score could move if the #1 opportunity above (costCuts[0]) were addressed, e.g. '+8-12 points' or 'Could move from At Risk to Healthy'>"`;
 
+    const riskTimelineFraming = `"riskTimeline": [
+    { "risk": "<short name of the most time-sensitive risk, e.g. 'Cash runway'>", "timeframe": "<specific and concrete, e.g. '~3 months' or '6-12 months'>", "detail": "<1 sentence grounded in the actual revenue/expenses/burn rate above explaining why it becomes critical in that timeframe>", "severity": "red"|"amb"|"grn" },
+    { "risk": "<2nd most time-sensitive risk>", "timeframe": "<specific>", "detail": "<1 sentence>", "severity": "red"|"amb"|"grn" },
+    { "risk": "<3rd most time-sensitive risk, or a positive/stable outlook if nothing else is urgent>", "timeframe": "<specific>", "detail": "<1 sentence>", "severity": "red"|"amb"|"grn" }
+  ]`;
+
     const prompt = `${personaBlock}
 
 Analyze this business and return ONLY valid JSON, no preamble, no markdown fences, nothing else.
@@ -237,19 +262,22 @@ Return JSON in EXACTLY this shape:
   ${payBenchmarkFraming},
   ${industryComparisonFraming},
   ${costCutsFraming},
-  ${fixImpactFraming}
+  ${fixImpactFraming},
+  ${riskTimelineFraming}
 }
 
 Rules:
 ${orderingRule}
 - "payBenchmark" should reflect realistic, industry-typical roles for a ${industry} business with ${employees} employees — infer likely roles (e.g. retail: cashier, store manager; restaurant: server, chef; SaaS: engineer, support).
 - "industryComparison" percentiles should be grounded in realistic typical benchmarks for a ${industry} business of similar size, derived from the revenue/expenses/employee count given — be specific and realistic, not generic (avoid defaulting every metric to 50).
+- "riskTimeline" items MUST be ordered soonest-first and grounded in the actual revenue/expenses/burn rate/debt numbers given — use specific, concrete timeframes, not vague ones like "eventually" or "long term".
 - Base numbers on the revenue, expenses, and employee count given. Be realistic, not generic.
 - Return ONLY the JSON object. No explanation, no markdown code fences.`;
 
     return await callGroqForJson(prompt, (parsed) => {
       if (!parsed || typeof parsed !== 'object') return;
       clampIndustryPercentiles(parsed);
+      sanitizeRiskTimeline(parsed);
       // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
       if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
         const topColor = parsed.costCuts?.[0]?.color;
@@ -438,7 +466,8 @@ async function handleStockAnalysis(ticker, companyName) {
         sellCount: 0,
         recentTransactions: []
       },
-      fixImpact: 'N/A'
+      fixImpact: 'N/A',
+      riskTimeline: []
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
@@ -657,7 +686,12 @@ Return ONLY valid JSON, no preamble, no markdown fences, nothing else, in EXACTL
   "insiderSentiment": {
     "summary": "<1-2 sentences interpreting what the insider buying/selling activity (${insiderNote}) suggests about executive confidence — do not restate the raw numbers, interpret them>"
   },
-  "fixImpact": "<short phrase estimating how much the overall business-health score could move if the #1 risk above (costCuts[0]) were resolved, e.g. '+10-15 points' or 'Could move from Moderate Risk to Safe'>"
+  "fixImpact": "<short phrase estimating how much the overall business-health score could move if the #1 risk above (costCuts[0]) were resolved, e.g. '+10-15 points' or 'Could move from Moderate Risk to Safe'>",
+  "riskTimeline": [
+    { "risk": "<short name of the most time-sensitive risk, e.g. 'Valuation correction' or 'Margin compression'>", "timeframe": "<specific and concrete, e.g. '3-6 months' or 'within 12 months'>", "detail": "<1 sentence grounded in the actual P/E ${peRatio}, debt/equity ${debtEquity}, momentum, or earnings trend above explaining why it becomes a concern in that timeframe>", "severity": "red"|"amb"|"grn" },
+    { "risk": "<2nd most time-sensitive risk>", "timeframe": "<specific>", "detail": "<1 sentence>", "severity": "red"|"amb"|"grn" },
+    { "risk": "<3rd most time-sensitive risk, or a positive/stable outlook if nothing else is urgent>", "timeframe": "<specific>", "detail": "<1 sentence>", "severity": "red"|"amb"|"grn" }
+  ]
 }
 
 Rules:
@@ -666,6 +700,7 @@ Rules:
 - CRITICAL: Do NOT default to a "safe middle" score (e.g. always landing near 65-75) regardless of the company. Actually weigh the specific numbers given: a company with negative profit margin, a deeply negative 52-week return, or a negative P/E is in real distress and should score well below 50 — potentially below 30 if multiple signals are bad. A company with strong margins, positive ROE, reasonable debt, and a healthy price trend should score 75+. Two different companies with different numbers should virtually never land on the same score — if your instinct is to give a similar score to what you'd give a very different company, re-examine the specific numbers above and adjust.
 - "stockAnalysis.safetyScore" is independent from the top-level "score" — a company can have a healthy business (high "score") but an unattractive stock price (low "safetyScore") if it looks overvalued, and vice versa.
 - If there is no recent insider activity, say so plainly rather than speculating.
+- "riskTimeline" items MUST be ordered soonest-first and grounded in the real P/E, debt, momentum, and margin figures given — use specific, concrete timeframes, not vague ones like "eventually" or "long term".
 - Return ONLY the JSON object.`;
 
   const competitors = await competitorsPromise;
@@ -673,6 +708,7 @@ Rules:
   return await callGroqForJson(prompt, (parsed) => {
     if (!parsed || typeof parsed !== 'object') return;
     clampIndustryPercentiles(parsed);
+    sanitizeRiskTimeline(parsed);
 
     // Blend the AI's score with a deterministic quality score computed from the real
     // numbers, so two companies with genuinely different fundamentals can't land on
