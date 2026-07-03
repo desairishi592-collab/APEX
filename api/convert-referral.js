@@ -65,7 +65,10 @@ export default async function handler(req) {
         Authorization: `Bearer ${serviceRoleKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ p_user_id: referral.referrer_id, p_amount: REFERRAL_BONUS_SCANS })
+      // Note: the deployed increment_bonus_scans function is registered with parameter names
+      // user_id/amount (not p_user_id/p_amount) — PostgREST matches RPC args by name, so these
+      // must match the function's actual signature exactly.
+      body: JSON.stringify({ user_id: referral.referrer_id, amount: REFERRAL_BONUS_SCANS })
     });
     if (!rpcRes.ok) throw new Error(`Supabase bonus_scans increment failed: ${rpcRes.status}`);
   } catch (e) {
