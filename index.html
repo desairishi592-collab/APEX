@@ -1068,7 +1068,10 @@
       referralCode = await ensureReferralCode();
     }
 
-    loadReferralCount();
+    // Awaited — the referral count feeds account-settings UI, so it must be populated
+    // before loadProfile() resolves. processPendingReferral() doesn't drive any immediately-
+    // rendered UI, so it's fine left as fire-and-forget.
+    await loadReferralCount();
     processPendingReferral();
   }
 
