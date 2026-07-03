@@ -1,25 +1,9 @@
 export const config = { runtime: 'edge' };
 
 import { generateApiKey } from '../lib/apiKeys.js';
+import { getUserFromSessionToken, getBearerToken } from '../lib/supabaseAuth.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
-// Public/publishable key — same one already embedded client-side in index.html, not a secret.
-const SUPABASE_ANON_KEY = 'sb_publishable_8mmrVblH7FPjx_n0z515JA_QIGON0BO';
-
-// Verifies the caller's Supabase session token (their normal login JWT — not an APEX API
-// key) and returns the authenticated user, or null if the token is missing/invalid.
-async function getUserFromSessionToken(token, anonKey) {
-  if (!token) return null;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: anonKey, Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
 
 // Generates (or regenerates — same action, since there's only ever one active key per user)
 // an API key for the logged-in user. The raw key is returned exactly once in this response;
@@ -38,9 +22,8 @@ export default async function handler(req) {
     });
   }
 
-  const authHeader = req.headers.get('authorization') || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  const user = await getUserFromSessionToken(token, SUPABASE_ANON_KEY);
+  const token = getBearerToken(req);
+  const user = await getUserFromSessionToken(token);
   if (!user?.id) {
     return new Response(JSON.stringify({ error: 'Not authenticated' }), {
       status: 401, headers: { 'Content-Type': 'application/json' }

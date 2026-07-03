@@ -457,6 +457,15 @@
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
 
     <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+      <div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px;">Refer a friend, get bonus scans</div>
+      <div id="am-referral-link-row" style="display:flex; gap:8px; margin-bottom:8px;">
+        <div id="am-referral-link" style="flex:1; min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px 10px; font-size:12px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</div>
+        <button class="btn-outline" style="padding:8px 12px; font-size:12px; white-space:nowrap;" onclick="copyReferralLink()" id="am-referral-copy-btn">Copy</button>
+      </div>
+      <div style="font-size:12px; color:var(--muted);" id="am-referral-stats">— friends referred, — bonus scans earned</div>
+    </div>
+
+    <div style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
         <span style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em;">API Access</span>
         <span id="am-api-key-status" style="font-size:11px; color:var(--dim);">—</span>
@@ -857,6 +866,93 @@
   let currentStockTicker = null; // ticker symbol of the primary stock scan, used for stock comparison
   let compareStockData = null;
   let compareStockName = '';
+  let bonusScans = 0;
+  let referralCode = null;
+  let referralCount = 0;
+
+  // ── REFERRALS ──
+  const REFERRAL_STORAGE_KEY = 'apex_referral';
+  const REFERRAL_PENDING_SIGNUP_KEY = 'apex_referral_pending_signup';
+  const REFERRAL_STORAGE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  // Captures ?ref=CODE from a referral link into localStorage (with an expiry, so a stale
+  // browser tab from weeks ago can't attribute a referral) — run once on page load, before
+  // the user has necessarily signed up yet.
+  (function captureReferralCode() {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (!ref) return;
+    try {
+      localStorage.setItem(REFERRAL_STORAGE_KEY, JSON.stringify({ code: ref.trim().toUpperCase(), expiresAt: Date.now() + REFERRAL_STORAGE_TTL_MS }));
+    } catch {
+      // Non-fatal: localStorage may be unavailable (e.g. private browsing) — referral just won't be attributed
+    }
+  })();
+
+  function getStoredReferralCode() {
+    try {
+      const raw = localStorage.getItem(REFERRAL_STORAGE_KEY);
+      if (!raw) return null;
+      const { code, expiresAt } = JSON.parse(raw);
+      if (!code || !expiresAt || Date.now() > expiresAt) {
+        localStorage.removeItem(REFERRAL_STORAGE_KEY);
+        return null;
+      }
+      return code;
+    } catch {
+      return null;
+    }
+  }
+
+  function clearStoredReferralCode() {
+    try {
+      localStorage.removeItem(REFERRAL_STORAGE_KEY);
+      localStorage.removeItem(REFERRAL_PENDING_SIGNUP_KEY);
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  // Only attempt referral recording right after an actual signup — not on every login — so an
+  // existing user who happens to browse to someone else's referral link isn't misattributed as
+  // a new referral. The pending-signup flag is set at signUp() time and survives an email-
+  // confirmation redirect since it lives in localStorage, not in-memory state.
+  async function processPendingReferral() {
+    if (!currentUser) return;
+    const code = getStoredReferralCode();
+    let pendingSignup = false;
+    try {
+      pendingSignup = localStorage.getItem(REFERRAL_PENDING_SIGNUP_KEY) === '1';
+    } catch {
+      pendingSignup = false;
+    }
+    if (!code || !pendingSignup) return;
+
+    try {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (token) {
+        await fetch('/api/record-referral', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ referralCode: code })
+        });
+      }
+    } catch (e) {
+      // Non-fatal: worst case this referral doesn't get attributed
+    } finally {
+      clearStoredReferralCode();
+    }
+  }
+
+  // Generates a short, readable code like "APEX-X7K2" — collisions are vanishingly unlikely
+  // (36^4 combinations) and the DB's unique constraint on referral_code is the real guardrail.
+  function generateReferralCode() {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // excludes ambiguous 0/O/1/I/L
+    let suffix = '';
+    for (let i = 0; i < 4; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    return `APEX-${suffix}`;
+  }
 
   // Effective Pro status: real Pro OR dev preview toggle (preview never touches billing/DB)
   function effectiveIsPro() {
@@ -961,10 +1057,43 @@
 
   async function loadProfile() {
     if (!currentUser) return;
-    const { data } = await sb.from('profiles').select('plan, scan_count, scan_limit_hit_at').eq('id', currentUser.id).single();
+    const { data } = await sb.from('profiles').select('plan, scan_count, scan_limit_hit_at, referral_code, bonus_scans').eq('id', currentUser.id).single();
     isPro = data?.plan === 'pro' || data?.plan === 'business';
     scanCount = data?.scan_count || 0;
     lastScanLimitHitAt = data?.scan_limit_hit_at || null;
+    bonusScans = data?.bonus_scans || 0;
+    referralCode = data?.referral_code || null;
+
+    if (!referralCode) {
+      referralCode = await ensureReferralCode();
+    }
+
+    loadReferralCount();
+    processPendingReferral();
+  }
+
+  // Lazily generates this user's referral code the first time their profile loads without
+  // one — covers both new signups and pre-existing users (a one-time SQL backfill also runs
+  // for existing users, but this makes the app self-healing regardless). Retries on the rare
+  // chance of a collision with another user's code.
+  async function ensureReferralCode() {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = generateReferralCode();
+      const { error } = await sb.from('profiles').update({ referral_code: candidate }).eq('id', currentUser.id);
+      if (!error) return candidate;
+      if (error.code !== '23505') break; // not a uniqueness conflict — stop retrying
+    }
+    return null;
+  }
+
+  async function loadReferralCount() {
+    if (!currentUser) return;
+    try {
+      const { count } = await sb.from('referrals').select('id', { count: 'exact', head: true }).eq('referrer_id', currentUser.id).eq('converted', true);
+      referralCount = count || 0;
+    } catch {
+      referralCount = 0;
+    }
   }
 
   function renderAuthState() {
@@ -1042,6 +1171,11 @@
     try {
       let result;
       if (authMode === 'signup') {
+        // Marks "a signup happened while a referral code was pending" — set in localStorage
+        // (not just a variable) so it survives the redirect if email confirmation is required.
+        if (getStoredReferralCode()) {
+          try { localStorage.setItem(REFERRAL_PENDING_SIGNUP_KEY, '1'); } catch {}
+        }
         result = await sb.auth.signUp({ email, password });
       } else {
         result = await sb.auth.signInWithPassword({ email, password });
@@ -1173,6 +1307,32 @@
     document.getElementById('am-api-key-display').style.display = 'none';
     document.getElementById('am-api-key-warning').style.display = 'none';
     refreshApiKeyStatus();
+    refreshReferralUI();
+  }
+
+  // ── REFERRALS (account settings) ──
+  function refreshReferralUI() {
+    const linkEl = document.getElementById('am-referral-link');
+    const statsEl = document.getElementById('am-referral-stats');
+    if (referralCode) {
+      linkEl.textContent = `https://apexledge.com?ref=${referralCode}`;
+    } else {
+      linkEl.textContent = 'Generating your referral link…';
+    }
+    statsEl.textContent = `${referralCount} friend${referralCount === 1 ? '' : 's'} referred, ${bonusScans} bonus scan${bonusScans === 1 ? '' : 's'} earned`;
+  }
+
+  function copyReferralLink() {
+    if (!referralCode) return;
+    const link = `https://apexledge.com?ref=${referralCode}`;
+    const btn = document.getElementById('am-referral-copy-btn');
+    navigator.clipboard.writeText(link).then(() => {
+      const prevText = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = prevText; }, 1500);
+    }).catch(() => {
+      // Non-fatal: clipboard API can be unavailable (e.g. insecure context) — link is still visible to copy manually
+    });
   }
 
   // ── API ACCESS (account settings) ──
@@ -2152,17 +2312,42 @@
 
       // Only real Pro skips the counter — preview-Pro is a dev view only, doesn't change billing state
       if (!isPro) {
-        scanCount += 1;
-        const updates = { scan_count: scanCount };
-        if (scanCount >= FREE_SCAN_LIMIT) {
-          lastScanLimitHitAt = new Date().toISOString();
-          updates.scan_limit_hit_at = lastScanLimitHitAt;
+        // Referral bonus scans are spent first, before counting against the free-tier limit.
+        if (bonusScans > 0) {
+          bonusScans -= 1;
+          await sb.from('profiles').update({ bonus_scans: bonusScans }).eq('id', currentUser.id);
+        } else {
+          scanCount += 1;
+          const updates = { scan_count: scanCount };
+          if (scanCount >= FREE_SCAN_LIMIT) {
+            lastScanLimitHitAt = new Date().toISOString();
+            updates.scan_limit_hit_at = lastScanLimitHitAt;
+          }
+          await sb.from('profiles').update(updates).eq('id', currentUser.id);
         }
-        await sb.from('profiles').update(updates).eq('id', currentUser.id);
       }
+
+      // If this was the referred user's first scan, this converts the referral and credits
+      // the referrer +3 bonus scans. A no-op on every scan after the first (or if this user
+      // wasn't referred at all) — safe to call unconditionally here.
+      convertReferralIfPending();
     } catch (e) {
       // Non-fatal: scan results already shown to user even if save fails
       console.error('Failed to save scan:', e);
+    }
+  }
+
+  async function convertReferralIfPending() {
+    try {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      await fetch('/api/convert-referral', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+      });
+    } catch {
+      // Non-fatal: worst case the referrer's bonus scan is credited on a later scan instead
     }
   }
 
