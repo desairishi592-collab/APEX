@@ -127,6 +127,10 @@
     .insight-body.ib-desc { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
 
     .dive-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 1.25rem; }
+    /* The compare-stock search dropdown is absolutely positioned and needs to escape this
+       card's bounds — .dive-card's overflow:hidden (there to clip content to the rounded
+       corners) was clipping/hiding the autocomplete results list. */
+    #r-compare-card { overflow: visible; }
     .dive-tabs { display: flex; border-bottom: 1px solid var(--border); }
     .dive-tab { padding: 10px 16px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.15s; font-family: 'Inter', sans-serif; }
     .dive-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
