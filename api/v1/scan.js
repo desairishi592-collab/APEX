@@ -38,7 +38,8 @@ export default async function handler(req) {
   try {
     userId = await lookupUserByApiKey(apiKey, SUPABASE_URL, serviceRoleKey);
   } catch (e) {
-    return errorResponse(502, 'Could not verify API key', { detail: e.message });
+    console.error('API key lookup failed:', e.message);
+    return errorResponse(502, 'Could not verify API key');
   }
   if (!userId) {
     return errorResponse(401, 'Invalid API key.');
@@ -75,7 +76,8 @@ export default async function handler(req) {
     try {
       matches = await searchFinnhub(company, finnhubKey);
     } catch (e) {
-      return errorResponse(502, 'Could not reach market data provider', { detail: e.message });
+      console.error('Finnhub search failed:', e.message);
+      return errorResponse(502, 'Could not reach market data provider');
     }
     const best = matches.find(m => m.symbol) || null;
     if (!best) {

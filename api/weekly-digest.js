@@ -3,6 +3,18 @@ export const config = { runtime: 'edge' };
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
+// No DOM available in the Edge runtime, so this is a manual escaper (unlike index.html's
+// DOM-based one) — used because businessName/companyName/ticker below are all ultimately
+// user-supplied (scan/watchlist input) and get embedded directly into an HTML email body.
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Lists every registered user via the Auth admin API (paginated, service-role only —
 // this is how the digest discovers "logged-in users" since email lives on auth.users,
 // not on the profiles table).
@@ -71,7 +83,7 @@ function scoreTrendSection(trend) {
   return `
     <h3 style="margin:24px 0 8px;font-size:16px;">Business health score trend</h3>
     <p style="margin:0 0 4px;">
-      <strong>${trend.businessName}</strong>: ${trend.previousScore} → ${trend.latestScore}
+      <strong>${escapeHtml(trend.businessName)}</strong>: ${trend.previousScore} → ${trend.latestScore}
       <span style="color:${color};font-weight:bold;">${arrow} ${Math.abs(trend.delta)}</span>
     </p>`;
 }
@@ -79,7 +91,7 @@ function scoreTrendSection(trend) {
 function signalChangesSection(changes) {
   if (!changes.length) return '';
   const rows = changes.map(c =>
-    `<li><strong>${c.companyName || c.ticker} (${c.ticker})</strong>: ${c.oldSignal} → <strong>${c.newSignal}</strong></li>`
+    `<li><strong>${escapeHtml(c.companyName || c.ticker)} (${escapeHtml(c.ticker)})</strong>: ${escapeHtml(c.oldSignal)} → <strong>${escapeHtml(c.newSignal)}</strong></li>`
   ).join('');
   return `
     <h3 style="margin:24px 0 8px;font-size:16px;">Watchlist signal changes</h3>
@@ -89,7 +101,7 @@ function signalChangesSection(changes) {
 function triggeredAlertsSection(alerts) {
   if (!alerts.length) return '';
   const rows = alerts.map(a =>
-    `<li><strong>${a.company_name || a.ticker} (${a.ticker})</strong> hit your target of $${a.target_price}</li>`
+    `<li><strong>${escapeHtml(a.company_name || a.ticker)} (${escapeHtml(a.ticker)})</strong> hit your target of $${a.target_price}</li>`
   ).join('');
   return `
     <h3 style="margin:24px 0 8px;font-size:16px;">Triggered price alerts this week</h3>
@@ -118,14 +130,14 @@ async function sendDigestEmail(resendKey, email, sections) {
 // watchlist signal drift, and price alerts triggered in the past week — and emails it
 // only if there's actually something to report.
 export default async function handler(req) {
+  // Fail CLOSED (require CRON_SECRET to be configured) rather than silently allowing public
+  // access if the env var is ever missing/misconfigured.
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { 'Content-Type': 'application/json' }
-      });
-    }
+  const authHeader = req.headers.get('authorization');
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -144,7 +156,8 @@ export default async function handler(req) {
   try {
     users = await listAllUsers(serviceRoleKey);
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Could not list users', detail: e.message }), {
+    console.error('Could not list users:', e.message);
+    return new Response(JSON.stringify({ error: 'Could not list users' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }

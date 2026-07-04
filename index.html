@@ -1584,7 +1584,7 @@
               <div class="history-meta">${companyName}</div>
             </div>
             <span class="signal-badge ${signalClass}">${escapeHtml(w.signal || '—')}</span>
-            <button class="auth-close" style="position:static; font-size:14px;" onclick="event.stopPropagation(); removeFromWatchlist('${ticker.replace(/'/g, "\\'")}')" title="Remove">✕</button>
+            <button class="auth-close" style="position:static; font-size:14px;" data-ticker="${ticker}" onclick="event.stopPropagation(); removeFromWatchlistBtn(this)" title="Remove">✕</button>
           </div>`;
       }).join('');
     } catch (e) {
@@ -1600,6 +1600,13 @@
     } catch (e) {
       // Non-fatal: leave the list as-is, user can retry
     }
+  }
+
+  // Reads the ticker via .dataset (a real DOM property read, not a re-parsed inline string) so
+  // there's no risk of a quote character in the ticker breaking out of a JS string literal
+  // embedded in an onclick="..." attribute.
+  function removeFromWatchlistBtn(btn) {
+    removeFromWatchlist(btn.dataset.ticker);
   }
 
   // ── PRICE ALERTS ("Wait for it") ──
@@ -1745,10 +1752,14 @@
     }
   }
 
+  // Safe for BOTH text-node content and quoted HTML attribute values — the DOM textContent
+  // trick alone only escapes &, <, > (sufficient for text nodes), so quotes are escaped
+  // manually here too since several call sites embed the result inside onclick="..." /
+  // data-*="..." attributes where an unescaped quote would break out.
   function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
-    return div.innerHTML;
+    return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function ordinalSuffix(n) {
@@ -2340,7 +2351,6 @@
       convertReferralIfPending();
     } catch (e) {
       // Non-fatal: scan results already shown to user even if save fails
-      console.error('Failed to save scan:', e);
     }
   }
 
@@ -2825,45 +2835,21 @@
 
 <script>
   // ── AI CHAT WIDGET ──
+  // The system prompt is now built server-side (api/chat.js) from the raw scan data stored
+  // here — the client used to build and send the whole prompt string itself, which let anyone
+  // POST an arbitrary systemPrompt directly to the endpoint. Now the server only accepts these
+  // structured fields and constructs the actual instructions given to the model itself.
   let chatHistory = [];
-  let chatScanContext = '';
+  let chatScanData = null;
+  let chatBizName = '';
+  let chatMode = 'owner';
   let chatOpen = false;
-
-  function buildChatContext(data, bizName, mode) {
-    const score = data.score ?? '?';
-    const status = data.status ?? '?';
-    const summary = data.summary ?? '';
-    const metrics = (data.metrics || []).map(m => `${m.label}: ${m.value} — ${m.trend}`).join('\n');
-    const risks = (data.costCuts || []).map(r => `• ${r.title}: ${r.desc}`).join('\n');
-    const industry = (data.industryComparison || []).map(i => `• ${i.label}: ${i.value}`).join('\n');
-    const isStock = data.isPublicStock;
-
-    return `You are APEX AI, a financial analysis assistant embedded in the APEX business health scanner. A user just completed an APEX ${isStock ? 'stock investment' : mode === 'investor' ? 'business investment' : 'business health'} scan. Here are the real results:
-
-Company/Business: ${bizName}
-Score: ${score}/100
-Status: ${status}
-Summary: ${summary}
-
-Key Metrics:
-${metrics}
-
-Risk Breakdown:
-${risks}
-
-Industry Comparison:
-${industry}
-
-Your job: answer the user's questions about this specific scan in plain, honest English. You can discuss whether it looks like a good investment, what the risks mean, how to think about position sizing given a budget, when to consider selling, what specific metrics mean in context, etc.
-
-Be balanced and data-driven — not overly bullish or bearish. If someone asks how many shares to buy with a specific dollar amount, calculate it from the current price shown in the metrics above.
-
-Keep answers concise — 2-4 sentences. End every response with a brief reminder like: "Keep in mind this is data-driven analysis — make the final call yourself or with a financial advisor you trust." Make it feel natural, not like a legal warning.`;
-  }
 
   function showChatWidget(data, bizName, mode) {
     chatHistory = [];
-    chatScanContext = buildChatContext(data, bizName, mode);
+    chatScanData = data;
+    chatBizName = bizName;
+    chatMode = mode;
     const messages = document.getElementById('chat-messages');
     messages.innerHTML = '';
     addChatMessage(`Hey! I just finished analyzing **${bizName}** — scored ${data.score}/100, ${data.status}. Got any questions? I can tell you if it's worth investing in, how many shares you could get with your budget, when to think about selling — anything based on what I just found.`, 'ai');
@@ -2912,8 +2898,9 @@ Keep answers concise — 2-4 sentences. End every response with a brief reminder
     const div = document.createElement('div');
     div.className = 'chat-msg';
     div.style.cssText = `align-self:${isAI ? 'flex-start' : 'flex-end'}; background:${isAI ? 'var(--surface)' : 'var(--accent)'}; border:1px solid ${isAI ? 'var(--border)' : 'transparent'}; border-radius:${isAI ? '12px 12px 12px 2px' : '12px 12px 2px 12px'}; padding:9px 13px; font-size:13px; color:var(--text); max-width:88%; line-height:1.6; word-break:break-word;`;
-    // Bold support for **text**
-    div.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Escape first so nothing in the message (user-typed or AI-generated) can inject markup,
+    // then apply bold-markdown support on the already-safe escaped text.
+    div.innerHTML = escapeHtml(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
     return div;
@@ -2933,7 +2920,7 @@ Keep answers concise — 2-4 sentences. End every response with a brief reminder
   async function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
-    if (!text || !chatScanContext) return;
+    if (!text || !chatScanData) return;
     input.value = '';
 
     addChatMessage(text, 'user');
@@ -2945,7 +2932,7 @@ Keep answers concise — 2-4 sentences. End every response with a brief reminder
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: chatHistory, systemPrompt: chatScanContext })
+        body: JSON.stringify({ messages: chatHistory, scanData: chatScanData, bizName: chatBizName, mode: chatMode })
       });
 
       const data = await res.json();

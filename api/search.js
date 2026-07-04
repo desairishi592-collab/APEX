@@ -1,6 +1,11 @@
 export const config = { runtime: 'edge' };
 
 import { searchFinnhub } from '../lib/finnhubSearch.js';
+import { checkAndIncrementIpRateLimit, getClientIp } from '../lib/rateLimit.js';
+
+const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
+const IP_RATE_LIMIT_MAX_REQUESTS = 60; // per hour, per IP — cheap endpoint (no LLM), but still proxies
+                                        // Finnhub's own rate-limited API and has no auth requirement.
 
 // These tickers are unambiguous and don't need live validation — skip the Finnhub
 // round-trip entirely to keep the default list cheap on API rate limits.
@@ -39,6 +44,17 @@ export default async function handler(req) {
     });
   }
 
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (serviceRoleKey) {
+    const ip = getClientIp(req);
+    const rateLimit = await checkAndIncrementIpRateLimit(ip, IP_RATE_LIMIT_MAX_REQUESTS, SUPABASE_URL, serviceRoleKey);
+    if (!rateLimit.allowed) {
+      return new Response(JSON.stringify({ error: 'Too many requests — please slow down and try again shortly.', retryAfterSeconds: rateLimit.retryAfterSeconds }), {
+        status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(rateLimit.retryAfterSeconds) }
+      });
+    }
+  }
+
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get('q') || '').trim();
   const popular = searchParams.get('popular') === '1';
@@ -73,7 +89,8 @@ export default async function handler(req) {
   try {
     matches = await searchFinnhub(q, finnhubKey);
   } catch (fetchErr) {
-    return new Response(JSON.stringify({ error: 'Could not reach market data provider', detail: fetchErr.message }), {
+    console.error('Finnhub search failed:', fetchErr.message);
+    return new Response(JSON.stringify({ error: 'Could not reach market data provider' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }

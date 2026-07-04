@@ -1,19 +1,28 @@
 export const config = { runtime: 'edge' };
 
 import { getUserFromSessionToken, getBearerToken } from '../lib/supabaseAuth.js';
+import { isAllowedOrigin } from '../lib/originCheck.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const REFERRAL_BONUS_SCANS = 3; // credited to the referrer once the referred user runs their first scan
 
 // Called after a scan completes. If the calling user was referred and hasn't already converted,
-// marks the referral converted and credits the referrer +3 bonus scans (via an atomic SQL
-// increment, not a read-then-write, so two friends converting at once can't race each other).
-// A no-op (200, converted: false) if there's nothing pending — this is expected on every scan
-// after the first, not an error.
+// marks the referral converted and credits the referrer +3 bonus scans. Both steps happen in a
+// single atomic Postgres transaction (convert_referral_and_credit) — previously these were two
+// separate requests (a PATCH then an RPC), and if the second failed after the first succeeded,
+// the referral was permanently marked converted with the referrer never actually credited. A
+// no-op (200, converted: false) if there's nothing pending — expected on every scan after the
+// first, not an error.
 export default async function handler(req) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!isAllowedOrigin(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403, headers: { 'Content-Type': 'application/json' }
     });
   }
 
@@ -33,51 +42,26 @@ export default async function handler(req) {
   }
 
   try {
-    const refRes = await fetch(`${SUPABASE_URL}/rest/v1/referrals?select=id,referrer_id&referred_id=eq.${user.id}&converted=eq.false`, {
-      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
-    });
-    if (!refRes.ok) throw new Error(`Supabase referral lookup failed: ${refRes.status}`);
-    const rows = await refRes.json();
-    const referral = rows[0];
-
-    if (!referral) {
-      return new Response(JSON.stringify({ converted: false }), {
-        status: 200, headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/referrals?id=eq.${referral.id}`, {
-      method: 'PATCH',
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=minimal'
-      },
-      body: JSON.stringify({ converted: true })
-    });
-    if (!updateRes.ok) throw new Error(`Supabase referral update failed: ${updateRes.status}`);
-
-    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/increment_bonus_scans`, {
+    const rpcRes = await fetch(`${SUPABASE_URL}/rest/v1/rpc/convert_referral_and_credit`, {
       method: 'POST',
       headers: {
         apikey: serviceRoleKey,
         Authorization: `Bearer ${serviceRoleKey}`,
         'Content-Type': 'application/json'
       },
-      // Note: the deployed increment_bonus_scans function is registered with parameter names
-      // user_id/amount (not p_user_id/p_amount) — PostgREST matches RPC args by name, so these
-      // must match the function's actual signature exactly.
-      body: JSON.stringify({ user_id: referral.referrer_id, amount: REFERRAL_BONUS_SCANS })
+      body: JSON.stringify({ p_referred_id: user.id, p_bonus_amount: REFERRAL_BONUS_SCANS })
     });
-    if (!rpcRes.ok) throw new Error(`Supabase bonus_scans increment failed: ${rpcRes.status}`);
+    if (!rpcRes.ok) throw new Error(`convert_referral_and_credit failed: ${rpcRes.status}`);
+    const rows = await rpcRes.json();
+    const converted = !!rows[0]?.converted;
+
+    return new Response(JSON.stringify({ converted }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    });
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Could not convert referral', detail: e.message }), {
+    console.error('Could not convert referral:', e.message);
+    return new Response(JSON.stringify({ error: 'Could not convert referral' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }
-
-  return new Response(JSON.stringify({ converted: true }), {
-    status: 200, headers: { 'Content-Type': 'application/json' }
-  });
 }

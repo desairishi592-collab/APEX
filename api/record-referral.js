@@ -1,8 +1,12 @@
 export const config = { runtime: 'edge' };
 
 import { getUserFromSessionToken, getBearerToken } from '../lib/supabaseAuth.js';
+import { checkAndIncrementRateLimit } from '../lib/rateLimit.js';
+import { isAllowedOrigin } from '../lib/originCheck.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
+const RATE_LIMIT_MAX_REQUESTS = 10;    // per hour, per user — this endpoint's only signal is
+const RATE_LIMIT_WINDOW_SECONDS = 3600; // valid/invalid, so it's a target for referral-code brute-forcing
 
 // Called once, right after a new user's signup completes, if a referral code was captured
 // from a ?ref= link earlier in the flow. Resolves the code to its owner (service-role lookup,
@@ -13,6 +17,12 @@ export default async function handler(req) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!isAllowedOrigin(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403, headers: { 'Content-Type': 'application/json' }
     });
   }
 
@@ -28,6 +38,15 @@ export default async function handler(req) {
   if (!user?.id) {
     return new Response(JSON.stringify({ error: 'Not authenticated' }), {
       status: 401, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  const rateLimit = await checkAndIncrementRateLimit(user.id, SUPABASE_URL, serviceRoleKey, {
+    maxRequests: RATE_LIMIT_MAX_REQUESTS, windowSeconds: RATE_LIMIT_WINDOW_SECONDS
+  });
+  if (!rateLimit.allowed) {
+    return new Response(JSON.stringify({ error: 'Too many attempts — please try again later.', retryAfterSeconds: rateLimit.retryAfterSeconds }), {
+      status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(rateLimit.retryAfterSeconds) }
     });
   }
 
@@ -78,7 +97,8 @@ export default async function handler(req) {
     });
     if (!insRes.ok) throw new Error(`Supabase referral insert failed: ${insRes.status}`);
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Could not record referral', detail: e.message }), {
+    console.error('Could not record referral:', e.message);
+    return new Response(JSON.stringify({ error: 'Could not record referral' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }

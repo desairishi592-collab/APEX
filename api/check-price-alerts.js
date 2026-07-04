@@ -36,16 +36,15 @@ async function sendAlertEmail(resendKey, alert, currentPrice) {
 // Runs on a schedule (see vercel.json crons) to check every active price alert against
 // the live market price, and emails the user once their target is hit.
 export default async function handler(req) {
-  // Vercel automatically sends this header on scheduled cron invocations when
-  // CRON_SECRET is set — verifying it stops the endpoint being triggered publicly.
+  // Vercel automatically sends this header on scheduled cron invocations when CRON_SECRET
+  // is set. Fail CLOSED (require the secret to be configured) rather than silently allowing
+  // public access if the env var is ever missing/misconfigured.
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get('authorization');
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { 'Content-Type': 'application/json' }
-      });
-    }
+  const authHeader = req.headers.get('authorization');
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { 'Content-Type': 'application/json' }
+    });
   }
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -66,7 +65,8 @@ export default async function handler(req) {
     if (!res.ok) throw new Error(`Supabase query failed: ${res.status}`);
     alerts = await res.json();
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Could not load alerts', detail: e.message }), {
+    console.error('Could not load alerts:', e.message);
+    return new Response(JSON.stringify({ error: 'Could not load alerts' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }

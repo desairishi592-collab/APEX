@@ -2,6 +2,7 @@ export const config = { runtime: 'edge' };
 
 import { generateApiKey } from '../lib/apiKeys.js';
 import { getUserFromSessionToken, getBearerToken } from '../lib/supabaseAuth.js';
+import { isAllowedOrigin } from '../lib/originCheck.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 
@@ -12,6 +13,12 @@ export default async function handler(req) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
+  if (!isAllowedOrigin(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), {
+      status: 403, headers: { 'Content-Type': 'application/json' }
     });
   }
 
@@ -54,7 +61,8 @@ export default async function handler(req) {
     });
     if (!insRes.ok) throw new Error(`Supabase insert failed: ${insRes.status}`);
   } catch (e) {
-    return new Response(JSON.stringify({ error: 'Could not save API key', detail: e.message }), {
+    console.error('Could not save API key:', e.message);
+    return new Response(JSON.stringify({ error: 'Could not save API key' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }
