@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -829,13 +830,13 @@
       </div>
     </div>
 
-    <div class="action-row" style="margin-bottom: 1.25rem;">
+    <div class="action-row no-print" style="margin-bottom: 1.25rem;">
       <button class="btn-outline" id="r-watchlist-btn" style="display:none;" onclick="saveToWatchlist()">☆ Save to Watchlist</button>
-      <button class="btn-outline" onclick="exportPdf()">⬇ Export PDF report</button>
+      <button class="btn-outline" id="export-pdf-btn" onclick="exportPdf()">⬇ Export PDF report</button>
     </div>
 
     <!-- PRO COMING SOON -->
-    <div style="background: var(--card); border: 1px solid var(--accent-glow); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-bottom: 1.25rem;">
+    <div class="no-print" style="background: var(--card); border: 1px solid var(--accent-glow); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-bottom: 1.25rem;">
       <div style="font-size: 20px; margin-bottom: 8px;">🚀</div>
       <div style="font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 16px; margin-bottom: 6px;">APEX Pro — Coming Soon</div>
       <div style="font-size: 13px; color: var(--muted); line-height: 1.6; max-width: 400px; margin: 0 auto;">Unlimited scans, score trend over time, PDF exports, and more. Everything you're seeing now is free during our beta — Pro unlocks even more when it launches.</div>
@@ -2770,10 +2771,37 @@
     }
   }
 
-  // ── PDF EXPORT (Pro only) ──
-  function exportPdf() {
-    if (!effectiveIsPro()) return;
-    window.print();
+  // ── PDF EXPORT ── (free during beta, per the "PDF exports... free during our beta" banner above)
+  async function exportPdf() {
+    const target = document.getElementById('s-results');
+    const btn = document.getElementById('export-pdf-btn');
+    if (!target || !window.html2pdf) {
+      alert('PDF export is temporarily unavailable — please try again in a moment.');
+      return;
+    }
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Generating PDF…';
+    try {
+      const safeName = (currentScanBizName || currentStockTicker || 'apex-report')
+        .toString().trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'apex-report';
+      await window.html2pdf().set({
+        margin: 10,
+        filename: `${safeName}-report.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        // Excludes .no-print elements (action buttons, the "Pro Coming Soon" banner) from the
+        // capture — they're page chrome, not part of the report itself.
+        html2canvas: { scale: 2, backgroundColor: '#0a0a0f', ignoreElements: (el) => el.classList.contains('no-print') },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      }).from(target).save();
+    } catch (e) {
+      console.error('PDF export failed:', e);
+      alert('Could not generate the PDF — please try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   }
 
   function drawRing(canvasId, score, greenMin, amberMin) {
