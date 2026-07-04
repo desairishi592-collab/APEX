@@ -21,13 +21,10 @@ const POPULAR_COMPANIES_STATIC = [
   { symbol: 'NVDA', description: 'NVIDIA CORP', type: 'Common Stock' }
 ];
 
-// Only these have real exchange-suffix ambiguity worth resolving live against
-// Finnhub (e.g. confirming Samsung's KRX suffix rather than guessing it).
-const POPULAR_COMPANIES_DYNAMIC = [
-  { name: 'Samsung Electronics', preferredSymbol: '005930.KS' },
-  { name: 'Toyota Motor', preferredSymbol: '7203.T' },
-  { name: 'LVMH Moet Hennessy', preferredSymbol: 'MC.PA' }
-];
+// US-only support: Finnhub represents non-US listings with a dot-suffixed symbol
+// (e.g. "005930.KS", "7203.T", "MC.PA", "0700.HK") — plain symbols with no dot are
+// NYSE/NASDAQ-listed. Filtering on the dot keeps this simple with no exchange allow-list to maintain.
+const isUsTicker = (symbol) => typeof symbol === 'string' && symbol.length > 0 && !symbol.includes('.');
 
 // Proxies Finnhub's symbol search so the API key stays server-side.
 export default async function handler(req) {
@@ -59,22 +56,10 @@ export default async function handler(req) {
   const q = (searchParams.get('q') || '').trim();
   const popular = searchParams.get('popular') === '1';
 
-  // Default list shown before the user has typed anything. The 9 unambiguous
-  // US megacaps are static (no Finnhub call, so this always renders even if
-  // Finnhub is down or rate-limited); only the 3 exchange-suffix-ambiguous
-  // international ones are resolved live, each independently best-effort.
+  // Default list shown before the user has typed anything — the 9 unambiguous
+  // US megacaps, static so this always renders even if Finnhub is down or rate-limited.
   if (popular && !q) {
-    const dynamicResults = await Promise.all(POPULAR_COMPANIES_DYNAMIC.map(async (c) => {
-      try {
-        const matches = await searchFinnhub(c.name, finnhubKey);
-        if (!matches.length) return null;
-        const best = matches.find(m => m.symbol === c.preferredSymbol) || matches[0];
-        return { symbol: best.symbol, description: best.description || c.name, type: best.type || '' };
-      } catch {
-        return null;
-      }
-    }));
-    return new Response(JSON.stringify({ results: [...POPULAR_COMPANIES_STATIC, ...dynamicResults.filter(Boolean)] }), {
+    return new Response(JSON.stringify({ results: POPULAR_COMPANIES_STATIC }), {
       status: 200, headers: { 'Content-Type': 'application/json' }
     });
   }
@@ -95,10 +80,9 @@ export default async function handler(req) {
     });
   }
 
-  // Keep international exchange listings (e.g. "005930.KS", "7203.T", "MC.PA") —
-  // only cap the list length, Finnhub already ranks by relevance.
+  // US exchanges only (NYSE/NASDAQ) — international listings are excluded for now.
   const results = matches
-    .filter(r => r.symbol)
+    .filter(r => r.symbol && isUsTicker(r.symbol))
     .slice(0, 10)
     .map(r => ({ symbol: r.symbol, description: r.description || '', type: r.type || '' }));
 

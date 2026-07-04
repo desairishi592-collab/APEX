@@ -387,8 +387,6 @@
     <button class="nav-account-btn" onclick="openAuth('login')" id="btn-login">Log in</button>
     <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')" id="btn-signup">Sign up</button>
   </div>
-  <!-- BETA BADGE: shows during open-access period -->
-  <span style="font-size:12px; background: var(--accent-dim); color: var(--accent); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--accent-glow); font-weight: 500;">Free beta — try everything</span>
 </nav>
 
 <!-- AUTH MODAL -->
@@ -1183,7 +1181,7 @@
         if (getStoredReferralCode()) {
           try { localStorage.setItem(REFERRAL_PENDING_SIGNUP_KEY, '1'); } catch {}
         }
-        result = await sb.auth.signUp({ email, password });
+        result = await sb.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin } });
       } else {
         result = await sb.auth.signInWithPassword({ email, password });
       }
@@ -2097,6 +2095,16 @@
       return;
     }
 
+    // Non-US listings use a dot-suffixed symbol (e.g. "005930.KS", "7203.T") — reject
+    // before hitting the API since only NYSE/NASDAQ-listed stocks are supported right now.
+    if (ticker.includes('.')) {
+      document.getElementById('stock-ticker').style.borderColor = '#ef4444';
+      const err = document.getElementById('stock-err-box');
+      err.textContent = '⚠ Only US-listed stocks (NYSE, NASDAQ) are currently supported.';
+      err.style.display = 'block';
+      return;
+    }
+
     show('s-loading');
     ['st1','st2','st3','st4','st5'].forEach((id, i) => {
       setTimeout(() => document.getElementById(id).classList.add('done'), 700 + i * 800);
@@ -2190,6 +2198,14 @@
 
     if (currentStockTicker && trimmedTicker.toUpperCase() === currentStockTicker) {
       errBox.textContent = '⚠ Choose a different stock to compare against.';
+      errBox.style.display = 'block';
+      return;
+    }
+
+    // Non-US listings use a dot-suffixed symbol (e.g. "005930.KS", "7203.T") — reject
+    // before hitting the API since only NYSE/NASDAQ-listed stocks are supported right now.
+    if (trimmedTicker.includes('.')) {
+      errBox.textContent = '⚠ Only US-listed stocks (NYSE, NASDAQ) are currently supported.';
       errBox.style.display = 'block';
       return;
     }
