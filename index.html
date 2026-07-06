@@ -160,6 +160,18 @@
     .signal-badge.neutral { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.25); }
     .signal-badge.nodata { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
 
+    .impact-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.03em; flex-shrink: 0; }
+    .impact-badge.positive { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
+    .impact-badge.negative { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+    .impact-badge.neutral { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
+    .news-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .news-row:last-child { border-bottom: none; }
+    .news-row-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+    .news-headline { font-size: 13px; font-weight: 500; color: var(--text); text-decoration: none; }
+    .news-headline:hover { text-decoration: underline; }
+    .news-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+    .news-note { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
     /* STOCK COMPARISON */
     .compare-winner-banner { background: var(--accent-dim); border: 1px solid var(--accent-glow); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; font-size: 13px; overflow-wrap: break-word; word-break: break-word; }
     .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
@@ -873,6 +885,15 @@
       </div>
     </div>
 
+    <!-- STOCK ONLY: top 3 most impactful recent headlines, AI-scored -->
+    <div class="dive-card" id="r-news-preview-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Recent news impact</div>
+        <div id="r-news-preview-rows"></div>
+        <button class="btn-outline" id="news-view-all-btn" style="width:100%; margin-top:10px; display:none;" onclick="openNewsPage()">View all recent news →</button>
+      </div>
+    </div>
+
     <div class="action-row no-print" style="margin-bottom: 1.25rem;">
       <button class="btn-outline" id="r-watchlist-btn" style="display:none;" onclick="saveToWatchlist()">☆ Save to Watchlist</button>
       <button class="btn-outline" id="export-pdf-btn" onclick="exportPdf()">⬇ Export PDF report</button>
@@ -900,6 +921,19 @@
   </div>
 </div>
 
+<!-- SCREEN 5: FULL NEWS FEED -->
+<div class="screen" id="s-news">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Recent News</h2>
+      <button class="rescan-btn" onclick="show('s-results')">← Back</button>
+    </div>
+    <div id="news-page-list">
+      <div class="history-loading">Loading news…</div>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── SUPABASE SETUP ──
   const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
@@ -922,6 +956,7 @@
   let notifPollTimer = null;
   let notifKnownIds = new Set(); // ids already toasted (or seeded) this session
   let notifSeeded = false; // true once the first poll after login has run, so we don't toast the whole backlog at once
+  let newsPageData = null; // cached /api/news response for the current scan, so "View all" doesn't re-fetch
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
@@ -2540,6 +2575,71 @@
     showCompareSearch();
   }
 
+  // ── AI NEWS FEED ──
+  const NEWS_SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
+
+  async function loadNewsPreview(ticker, score, redFlags) {
+    const card = document.getElementById('r-news-preview-card');
+    const rowsEl = document.getElementById('r-news-preview-rows');
+    const viewAllBtn = document.getElementById('news-view-all-btn');
+    if (!card || !ticker) return;
+
+    try {
+      const res = await fetch('/api/news', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, score, redFlags: redFlags || [] })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Could not load news');
+
+      newsPageData = data.news || [];
+      if (!newsPageData.length) {
+        card.style.display = 'none';
+        return;
+      }
+
+      card.style.display = 'block';
+      const top3 = [...newsPageData]
+        .sort((a, b) => NEWS_SEVERITY_RANK[a.severity] - NEWS_SEVERITY_RANK[b.severity])
+        .slice(0, 3);
+      rowsEl.innerHTML = top3.map(renderNewsRow).join('');
+      viewAllBtn.style.display = newsPageData.length > 3 ? 'block' : 'none';
+    } catch (e) {
+      // Non-fatal: news is supplementary, not critical path — just hide the card
+      card.style.display = 'none';
+    }
+  }
+
+  function renderNewsRow(item) {
+    const headline = escapeHtml(item.headline || '');
+    const source = escapeHtml(item.source || '');
+    const date = item.datetime ? new Date(item.datetime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    const note = escapeHtml(item.note || '');
+    const impact = ['positive', 'negative', 'neutral'].includes(item.impact) ? item.impact : 'neutral';
+    const urlAttr = item.url ? ` href="${escapeHtml(item.url)}" target="_blank" rel="noopener"` : '';
+    const headlineTag = item.url ? 'a' : 'span';
+    return `
+      <div class="news-row">
+        <div class="news-row-top">
+          <${headlineTag} class="news-headline"${urlAttr}>${headline}</${headlineTag}>
+          <span class="impact-badge ${impact}">${impact}</span>
+        </div>
+        <div class="news-meta">${source}${date ? ' · ' + date : ''}</div>
+        ${note ? `<div class="news-note">${note}</div>` : ''}
+      </div>`;
+  }
+
+  function openNewsPage() {
+    show('s-news');
+    const listEl = document.getElementById('news-page-list');
+    if (!newsPageData || !newsPageData.length) {
+      listEl.innerHTML = '<div class="history-empty">No recent news available.</div>';
+      return;
+    }
+    listEl.innerHTML = newsPageData.map(renderNewsRow).join('');
+  }
+
   // ── SAVE SCAN TO HISTORY + INCREMENT COUNT ──
   async function saveScanAndIncrement(bizName, industry, data) {
     if (!currentUser) return;
@@ -2783,6 +2883,17 @@
       } else {
         redFlagsCard.style.display = 'none';
         redFlagsRows.innerHTML = '';
+      }
+    }
+
+    // STOCK ONLY: recent news impact — reset whenever a new primary scan renders
+    const newsCard = document.getElementById('r-news-preview-card');
+    if (newsCard) {
+      newsPageData = null;
+      if (d.isPublicStock) {
+        loadNewsPreview(currentStockTicker, d.score, d.redFlags);
+      } else {
+        newsCard.style.display = 'none';
       }
     }
 
