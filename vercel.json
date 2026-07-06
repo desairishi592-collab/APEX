@@ -3,7 +3,10 @@
     { "source": "/api/analyze", "destination": "/api/analyze.js" }
   ],
   "crons": [
-    { "path": "/api/check-price-alerts", "schedule": "0 14 * * *" },
+    { "path": "/api/check-market-alerts", "schedule": "0 14 * * *" },
     { "path": "/api/weekly-digest", "schedule": "0 9 * * 1" }
+  ],
+  "headers": [
+    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
   ]
 }
