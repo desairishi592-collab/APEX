@@ -4,6 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>APEX — Business Health Scanner</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#6C63FF" />
+  <link rel="icon" href="/icons/icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="APEX" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -316,6 +323,29 @@
     .nav-account-btn:hover { border-color: var(--border-hover); }
     .pro-pill { font-size: 11px; background: var(--green-dim); color: var(--green); padding: 3px 9px; border-radius: 20px; border: 1px solid rgba(34,197,94,0.25); }
 
+    .nav-bell-btn { position: relative; }
+    .notif-badge { position: absolute; top: -4px; right: -4px; background: var(--accent); color: #fff; font-size: 10px; line-height: 1; font-weight: 600; min-width: 15px; height: 15px; border-radius: 999px; display: flex; align-items: center; justify-content: center; padding: 2px; }
+
+    .notif-toast-stack { position: fixed; top: 16px; right: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; }
+    .notif-toast { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; max-width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); font-size: 13px; animation: fadeIn 0.2s ease-out; cursor: pointer; }
+    .notif-toast .nt-title { font-weight: 600; margin-bottom: 2px; }
+    .notif-toast .nt-body { color: var(--muted); font-size: 12px; }
+
+    .pwa-install-banner {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 300; display: none; align-items: center; gap: 14px;
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); max-width: 420px; width: calc(100% - 32px);
+      animation: fadeIn 0.25s ease-out;
+    }
+    .pwa-install-banner.active { display: flex; }
+    .pwa-install-banner .pib-icon { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; }
+    .pwa-install-banner .pib-text { flex: 1; min-width: 0; font-size: 13px; }
+    .pwa-install-banner .pib-title { font-weight: 600; color: var(--text); }
+    .pwa-install-banner .pib-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .pwa-install-banner .pib-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .pwa-install-banner .pib-dismiss { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 4px 6px; }
+
     .auth-overlay { position: fixed; inset: 0; background: rgba(5,5,8,0.85); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: center; justify-content: center; padding: 1rem; }
     .auth-overlay.active { display: flex; }
     .auth-modal { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; max-width: 380px; width: 100%; position: relative; }
@@ -518,6 +548,18 @@
     <div class="history-sub">Price targets you're waiting for.</div>
     <div class="history-list" id="alerts-list">
       <div class="history-loading">Loading alerts…</div>
+    </div>
+  </div>
+</div>
+
+<!-- NOTIFICATIONS MODAL -->
+<div class="auth-overlay" id="notifications-overlay">
+  <div class="history-modal">
+    <button class="auth-close" onclick="closeNotifications()">✕</button>
+    <h2>Notifications</h2>
+    <div class="history-sub">Price alerts and watchlist moves.</div>
+    <div class="history-list" id="notifications-list">
+      <div class="history-loading">Loading notifications…</div>
     </div>
   </div>
 </div>
@@ -877,6 +919,9 @@
   let pendingScanAfterAuth = false;
   let pendingWatchlistSave = false;
   let pendingPriceAlertSave = false;
+  let notifPollTimer = null;
+  let notifKnownIds = new Set(); // ids already toasted (or seeded) this session
+  let notifSeeded = false; // true once the first poll after login has run, so we don't toast the whole backlog at once
   const FREE_SCAN_LIMIT = 3;
   const GUEST_SCAN_LIMIT = 1;
   const WAIT_HOURS = 120;
@@ -1120,20 +1165,24 @@
     const navAuth = document.getElementById('nav-auth');
     if (currentUser) {
       navAuth.innerHTML = `
+        <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">🔔<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
         <button class="nav-account-btn" onclick="openWatchlistPage()">☆ Watchlist</button>
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
         ${effectiveIsPro() ? '<span class="pro-pill">' + (isPro ? 'PRO' : 'PRO PREVIEW') + '</span>' : ''}
       `;
+      startNotificationPolling();
     } else if (isGuest) {
       navAuth.innerHTML = `
         <span style="font-size:12px; color: var(--muted);">Browsing as guest</span>
         <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')">Sign up</button>
       `;
+      stopNotificationPolling();
     } else {
       navAuth.innerHTML = `
         <button class="nav-account-btn" onclick="openAuth('login')">Log in</button>
         <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')">Sign up</button>
       `;
+      stopNotificationPolling();
     }
   }
 
@@ -1785,6 +1834,129 @@
       loadAlerts();
     } catch (e) {
       // Non-fatal: leave the list as-is, user can retry
+    }
+  }
+
+  // ── NOTIFICATIONS (in-app: price alerts + watchlist moves) ──
+  function startNotificationPolling() {
+    if (notifPollTimer) return; // already running
+    refreshNotifications(); // immediate first check, don't wait for the first interval tick
+    notifPollTimer = setInterval(refreshNotifications, 60000);
+  }
+
+  function stopNotificationPolling() {
+    clearInterval(notifPollTimer);
+    notifPollTimer = null;
+    notifKnownIds = new Set();
+    notifSeeded = false;
+  }
+
+  async function refreshNotifications() {
+    if (!currentUser) return;
+    try {
+      const { data, error } = await sb
+        .from('notifications')
+        .select('id, type, ticker, company_name, title, body, read, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+
+      const rows = data || [];
+      updateNotifBadge(rows.filter(n => !n.read).length);
+
+      // Toast only genuinely new unread rows not seen yet this session — the first poll
+      // after login just seeds notifKnownIds so it doesn't toast the whole backlog at once.
+      for (const n of rows) {
+        if (!n.read && !notifKnownIds.has(n.id) && notifSeeded) {
+          showNotifToast(n);
+        }
+        notifKnownIds.add(n.id);
+      }
+      notifSeeded = true;
+    } catch (e) {
+      // Non-fatal: badge just stays stale until the next successful poll
+    }
+  }
+
+  function updateNotifBadge(count) {
+    const badge = document.getElementById('notif-badge');
+    if (!badge) return;
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.style.display = count > 0 ? 'flex' : 'none';
+  }
+
+  function showNotifToast(n) {
+    const stack = document.getElementById('notif-toast-stack');
+    if (!stack) return;
+    const el = document.createElement('div');
+    el.className = 'notif-toast';
+    el.innerHTML = `<div class="nt-title">${escapeHtml(n.title)}</div><div class="nt-body">${escapeHtml(n.body)}</div>`;
+    el.onclick = () => { el.remove(); openNotifications(); };
+    stack.appendChild(el);
+    setTimeout(() => el.remove(), 8000);
+  }
+
+  function openNotifications() {
+    document.getElementById('notifications-overlay').classList.add('active');
+    loadNotifications();
+  }
+
+  function closeNotifications() {
+    document.getElementById('notifications-overlay').classList.remove('active');
+  }
+
+  async function loadNotifications() {
+    const listEl = document.getElementById('notifications-list');
+    listEl.innerHTML = '<div class="history-loading">Loading notifications…</div>';
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your notifications.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('notifications')
+        .select('id, type, ticker, company_name, title, body, read, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+
+      const rows = data || [];
+      if (!rows.length) {
+        listEl.innerHTML = '<div class="history-empty">No notifications yet — set a price alert or save a stock to your watchlist to get notified here.</div>';
+        return;
+      }
+
+      listEl.innerHTML = rows.map(n => {
+        const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const title = escapeHtml(n.title);
+        const body = escapeHtml(n.body);
+        const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
+        return `
+          <div class="history-item" style="cursor:default;">
+            <div class="history-info">
+              <div class="history-biz">${unreadDot}${title}</div>
+              <div class="history-meta">${body} · ${date}</div>
+            </div>
+          </div>`;
+      }).join('');
+
+      await markVisibleNotificationsRead(rows);
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your notifications. Please try again.</div>';
+    }
+  }
+
+  async function markVisibleNotificationsRead(rows) {
+    const unreadIds = rows.filter(n => !n.read).map(n => n.id);
+    if (!unreadIds.length || !currentUser) return;
+    try {
+      await sb.from('notifications').update({ read: true }).in('id', unreadIds).eq('user_id', currentUser.id);
+      updateNotifBadge(0); // optimistic — next poll reconciles with the server anyway
+    } catch (e) {
+      // Non-fatal: badge count just stays wrong until the next poll/panel open
     }
   }
 
@@ -3026,6 +3198,76 @@
       addChatMessage('Something went wrong. Please try again.', 'ai');
     }
   }
+
+  // ── PWA: service worker registration + install banner ──
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+
+  const PWA_DISMISS_KEY = 'pwaInstallDismissed';
+  let deferredInstallPrompt = null;
+
+  // Fires once Chrome/Edge determine the manifest+SW+HTTPS installability criteria are
+  // met — this IS "the browser detects it's installable". We can't legally skip straight
+  // to the native dialog without a user gesture (browsers block that to prevent hostile
+  // auto-installing sites), so this is the earliest point our own banner can appear;
+  // clicking "Install" below is what triggers the real native prompt.
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    if (localStorage.getItem(PWA_DISMISS_KEY)) return;
+    deferredInstallPrompt = e;
+    document.getElementById('pwa-install-banner').classList.add('active');
+  });
+
+  window.addEventListener('appinstalled', () => {
+    document.getElementById('pwa-install-banner').classList.remove('active');
+    deferredInstallPrompt = null;
+  });
+
+  async function triggerPwaInstall() {
+    const banner = document.getElementById('pwa-install-banner');
+    if (!deferredInstallPrompt) {
+      banner.classList.remove('active');
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    banner.classList.remove('active');
+  }
+
+  function dismissPwaInstallBanner() {
+    document.getElementById('pwa-install-banner').classList.remove('active');
+    try { localStorage.setItem(PWA_DISMISS_KEY, '1'); } catch {}
+  }
+
+  // iOS Safari never fires beforeinstallprompt (no equivalent API exists there) — show a
+  // simpler instructional banner instead, since there's no programmatic install path.
+  // Deferred to 'load' since the banner markup sits later in the document than this
+  // script block — running immediately would hit these elements before they exist.
+  window.addEventListener('load', function maybeShowIosInstallBanner() {
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if (!isIos || isStandalone || localStorage.getItem(PWA_DISMISS_KEY)) return;
+    document.getElementById('pwa-install-title').textContent = 'Install APEX on iOS';
+    document.getElementById('pwa-install-sub').textContent = 'Tap the Share icon, then "Add to Home Screen".';
+    document.getElementById('pwa-install-actions').innerHTML = '<button class="pib-dismiss" onclick="dismissPwaInstallBanner()" title="Dismiss">✕</button>';
+    document.getElementById('pwa-install-banner').classList.add('active');
+  });
 </script>
+<div class="notif-toast-stack" id="notif-toast-stack"></div>
+<div class="pwa-install-banner" id="pwa-install-banner">
+  <img class="pib-icon" src="/icons/icon-192.png" alt="" />
+  <div class="pib-text">
+    <div class="pib-title" id="pwa-install-title">Install APEX</div>
+    <div class="pib-sub" id="pwa-install-sub">Add it to your home screen or dock for quick access.</div>
+  </div>
+  <div class="pib-actions" id="pwa-install-actions">
+    <button class="btn btn-accent" style="padding:7px 14px; font-size:13px;" onclick="triggerPwaInstall()" id="pwa-install-btn">Install</button>
+    <button class="pib-dismiss" onclick="dismissPwaInstallBanner()" title="Dismiss">✕</button>
+  </div>
+</div>
 </body>
 </html>
