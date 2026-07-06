@@ -355,6 +355,20 @@
     .history-empty { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
     .history-loading { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
 
+    .watchlist-item { display: flex; align-items: center; gap: 14px; padding: 14px 4px; border-bottom: 1px solid var(--border); }
+    .watchlist-item:last-child { border-bottom: none; }
+    .watchlist-info { flex: 1; min-width: 0; }
+    .watchlist-ticker { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 600; color: var(--text); }
+    .watchlist-name { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .watchlist-price-block { text-align: right; flex-shrink: 0; }
+    .watchlist-price { font-family: 'Space Grotesk', sans-serif; font-size: 15px; font-weight: 600; color: var(--text); }
+    .watchlist-change { font-size: 12px; margin-top: 2px; font-weight: 500; }
+    .watchlist-change.up { color: var(--green); }
+    .watchlist-change.down { color: var(--red); }
+    .watchlist-change.flat { color: var(--muted); }
+    .watchlist-remove-btn { background: none; border: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 6px; flex-shrink: 0; transition: color 0.15s; }
+    .watchlist-remove-btn:hover { color: var(--red); }
+
     @media (max-width: 540px) {
       .score-card { flex-direction: column; text-align: center; }
       .biz-grid { grid-template-columns: 1fr; }
@@ -455,7 +469,6 @@
       <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:block;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
       <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">My Scan History</button>
     </div>
-    <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openWatchlist()" id="am-watchlist-btn">My Watchlist</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openAlerts()" id="am-alerts-btn">My Alerts</button>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="logout()">Log out</button>
 
@@ -493,18 +506,6 @@
     <div class="history-sub">Your past business health scans.</div>
     <div class="history-list" id="history-list">
       <div class="history-loading">Loading scans…</div>
-    </div>
-  </div>
-</div>
-
-<!-- WATCHLIST MODAL -->
-<div class="auth-overlay" id="watchlist-overlay">
-  <div class="history-modal">
-    <button class="auth-close" onclick="closeWatchlist()">✕</button>
-    <h2>My Watchlist</h2>
-    <div class="history-sub">Public stocks you've saved to track.</div>
-    <div class="history-list" id="watchlist-list">
-      <div class="history-loading">Loading watchlist…</div>
     </div>
   </div>
 </div>
@@ -844,6 +845,19 @@
   </div>
 </div>
 
+<!-- SCREEN 4: WATCHLIST -->
+<div class="screen" id="s-watchlist">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>My Watchlist</h2>
+      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+    </div>
+    <div class="watchlist-page-list" id="watchlist-page-list">
+      <div class="history-loading">Loading watchlist…</div>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── SUPABASE SETUP ──
   const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
@@ -1106,6 +1120,7 @@
     const navAuth = document.getElementById('nav-auth');
     if (currentUser) {
       navAuth.innerHTML = `
+        <button class="nav-account-btn" onclick="openWatchlistPage()">☆ Watchlist</button>
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
         ${effectiveIsPro() ? '<span class="pro-pill">' + (isPro ? 'PRO' : 'PRO PREVIEW') + '</span>' : ''}
       `;
@@ -1535,18 +1550,16 @@
     }
   }
 
-  function openWatchlist() {
-    closeAccount();
-    document.getElementById('watchlist-overlay').classList.add('active');
-    loadWatchlist();
+  function openWatchlistPage() {
+    show('s-watchlist');
+    loadWatchlistPage();
   }
 
-  function closeWatchlist() {
-    document.getElementById('watchlist-overlay').classList.remove('active');
-  }
-
-  async function loadWatchlist() {
-    const listEl = document.getElementById('watchlist-list');
+  // Renders the saved rows immediately (so the page isn't blank while prices load), then
+  // fetches live quotes in one batched request and patches price/change into each row —
+  // avoids a separate Finnhub round-trip per ticker from the client.
+  async function loadWatchlistPage() {
+    const listEl = document.getElementById('watchlist-page-list');
     listEl.innerHTML = '<div class="history-loading">Loading watchlist…</div>';
 
     if (!currentUser) {
@@ -1554,48 +1567,72 @@
       return;
     }
 
+    let rows;
     try {
       const { data, error } = await sb
         .from('watchlist')
-        .select('ticker, company_name, safety_score, signal, created_at')
+        .select('ticker, company_name, created_at')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false });
-
       if (error) throw error;
-
-      if (!data || data.length === 0) {
-        listEl.innerHTML = '<div class="history-empty">No saved stocks yet — scan a public stock and tap "Save to Watchlist" to track it here.</div>';
-        return;
-      }
-
-      listEl.innerHTML = data.map(w => {
-        const score = w.safety_score ?? 0;
-        const scoreClass = score >= 66 ? 'hs-good' : score >= 41 ? 'hs-warn' : 'hs-bad';
-        const signalLower = (w.signal || '').toLowerCase();
-        const signalClass = signalLower === 'buy' ? 'buy' : signalLower === 'sell' ? 'sell' : 'hold';
-        const ticker = escapeHtml(w.ticker || '');
-        const companyName = escapeHtml(w.company_name || w.ticker || '');
-        return `
-          <div class="history-item">
-            <div class="history-score ${scoreClass}">${score}</div>
-            <div class="history-info">
-              <div class="history-biz">${ticker}</div>
-              <div class="history-meta">${companyName}</div>
-            </div>
-            <span class="signal-badge ${signalClass}">${escapeHtml(w.signal || '—')}</span>
-            <button class="auth-close" style="position:static; font-size:14px;" data-ticker="${ticker}" onclick="event.stopPropagation(); removeFromWatchlistBtn(this)" title="Remove">✕</button>
-          </div>`;
-      }).join('');
+      rows = data || [];
     } catch (e) {
       listEl.innerHTML = '<div class="history-empty">Couldn\'t load your watchlist. Please try again.</div>';
+      return;
     }
+
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="history-empty">No saved stocks yet — scan a public stock and tap "Save to Watchlist" to track it here.</div>';
+      return;
+    }
+
+    listEl.innerHTML = rows.map(w => renderWatchlistRow(w, null)).join('');
+
+    try {
+      const tickers = [...new Set(rows.map(r => r.ticker))];
+      const res = await fetch(`/api/watchlist-quotes?tickers=${encodeURIComponent(tickers.join(','))}`);
+      const data = await res.json();
+      if (res.ok && data.quotes) {
+        listEl.innerHTML = rows.map(w => renderWatchlistRow(w, data.quotes[w.ticker] || null)).join('');
+      }
+    } catch (e) {
+      // Non-fatal: rows already rendered without live prices, just leave them as "—"
+    }
+  }
+
+  function renderWatchlistRow(w, quote) {
+    const ticker = escapeHtml(w.ticker || '');
+    const companyName = escapeHtml(w.company_name || w.ticker || '');
+    let priceHtml = '<span style="color:var(--muted);">—</span>';
+    let changeHtml = '';
+    if (quote && typeof quote.price === 'number') {
+      priceHtml = `$${quote.price.toFixed(2)}`;
+      if (typeof quote.change === 'number' && typeof quote.percentChange === 'number') {
+        const dir = quote.change > 0 ? 'up' : quote.change < 0 ? 'down' : 'flat';
+        const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '—';
+        const sign = quote.change > 0 ? '+' : '';
+        changeHtml = `<div class="watchlist-change ${dir}">${arrow} ${sign}${quote.change.toFixed(2)} (${sign}${quote.percentChange.toFixed(2)}%)</div>`;
+      }
+    }
+    return `
+      <div class="watchlist-item">
+        <div class="watchlist-info">
+          <div class="watchlist-ticker">${ticker}</div>
+          <div class="watchlist-name">${companyName}</div>
+        </div>
+        <div class="watchlist-price-block">
+          <div class="watchlist-price">${priceHtml}</div>
+          ${changeHtml}
+        </div>
+        <button class="watchlist-remove-btn" data-ticker="${ticker}" onclick="removeFromWatchlistBtn(this)" title="Remove">✕</button>
+      </div>`;
   }
 
   async function removeFromWatchlist(ticker) {
     if (!currentUser) return;
     try {
       await sb.from('watchlist').delete().eq('user_id', currentUser.id).eq('ticker', ticker);
-      loadWatchlist();
+      loadWatchlistPage();
     } catch (e) {
       // Non-fatal: leave the list as-is, user can retry
     }
