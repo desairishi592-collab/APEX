@@ -197,6 +197,14 @@
     .compare-row:last-child { border-bottom: none; }
     .compare-row .cr-label { color: var(--muted); }
     .compare-row .cr-val { font-weight: 500; color: var(--text); text-align: right; overflow-wrap: break-word; word-break: break-word; max-width: 100%; }
+    .compare-row .cr-val.better { color: var(--green); }
+    .compare-row .cr-val.worse { color: var(--red); }
+    .compare-redflags { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .compare-redflags-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+    .compare-redflags .severity-badge { margin: 0 4px 4px 0; }
+    .compare-verdict-card { background: var(--accent-dim); border: 1px solid var(--accent-glow); border-radius: var(--radius-sm); padding: 14px; margin-top: 12px; font-size: 13px; }
+    .compare-verdict-reasons { margin: 8px 0 0; padding-left: 18px; }
+    .compare-verdict-reasons li { margin-bottom: 4px; }
 
     /* PAYROLL SAFETY CALCULATOR */
     .payroll-safety-card { background: var(--green-dim); border: 1px solid rgba(34,197,94,0.35); border-radius: var(--radius); padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
@@ -453,6 +461,7 @@
     <div class="nav-logo-mark">AX</div>
     <span class="nav-logo-text">APEX</span>
   </a>
+  <button class="nav-account-btn" onclick="openStandaloneComparePage()">⚖ Compare</button>
   <!-- PHASE 2: user accounts enabled -->
   <div class="nav-auth" id="nav-auth">
     <button class="nav-account-btn" onclick="openAuth('login')" id="btn-login">Log in</button>
@@ -1014,6 +1023,43 @@
         <div class="err" id="add-holding-err" style="display:none; margin-top:10px;"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- SCREEN 7: STANDALONE COMPARE -->
+<div class="screen" id="s-compare">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Compare Companies</h2>
+      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+    </div>
+
+    <div class="dive-card" id="standalone-compare-form-card">
+      <div class="dive-body">
+        <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
+          <div class="search-wrap">
+            <input type="text" id="standalone-compare-a" placeholder="First company (e.g. Apple or AAPL)" autocomplete="off"
+              oninput="onStockSearchInput(this.value, 'standalone-compare-a', 'standalone-compare-a-dropdown')"
+              onfocus="onStockSearchInput(this.value, 'standalone-compare-a', 'standalone-compare-a-dropdown')" />
+            <div class="search-dropdown" id="standalone-compare-a-dropdown" style="display:none;"></div>
+          </div>
+          <div class="search-wrap">
+            <input type="text" id="standalone-compare-b" placeholder="Second company (e.g. Microsoft or MSFT)" autocomplete="off"
+              oninput="onStockSearchInput(this.value, 'standalone-compare-b', 'standalone-compare-b-dropdown')"
+              onfocus="onStockSearchInput(this.value, 'standalone-compare-b', 'standalone-compare-b-dropdown')" />
+            <div class="search-dropdown" id="standalone-compare-b-dropdown" style="display:none;"></div>
+          </div>
+        </div>
+        <button class="btn btn-accent btn-full" onclick="runStandaloneCompare()">Compare →</button>
+        <div class="err" id="standalone-compare-err" style="display:none; margin-top:10px;"></div>
+      </div>
+    </div>
+
+    <div id="standalone-compare-loading" style="display:none; text-align:center; padding:1.5rem 0; color:var(--muted); font-size:13px;">
+      Analyzing both companies…
+    </div>
+
+    <div id="standalone-compare-result-area" style="display:none;"></div>
   </div>
 </div>
 
@@ -2393,6 +2439,7 @@
       if (r) {
         if (contextId === 'compare') selectCompareSearchResult(r.symbol, r.description);
         else if (contextId === 'portfolio-add') selectPortfolioTicker(r.symbol, r.description);
+        else if (contextId === 'standalone-compare-a' || contextId === 'standalone-compare-b') selectStandaloneCompareTicker(contextId, r.symbol, r.description);
         else selectStockSearchResult(r.symbol, r.description);
       }
       return;
@@ -2519,6 +2566,38 @@
     runCompareScan(btn.dataset.ticker, btn.dataset.name);
   }
 
+  // Fetches + validates one side of a comparison — shared by both entry points (the
+  // from-scan-report flow below and the standalone compare page) so the fetch/validation
+  // pipeline exists in exactly one place rather than being duplicated.
+  async function fetchCompareData(ticker, companyName) {
+    const trimmedTicker = (ticker || '').trim();
+    if (!trimmedTicker) throw new Error('Please enter a ticker symbol.');
+    // Non-US listings use a dot-suffixed symbol (e.g. "005930.KS", "7203.T") — reject
+    // before hitting the API since only NYSE/NASDAQ-listed stocks are supported right now.
+    // (runCompareScan below also checks this earlier, before its guest-scan-limit check, so
+    // this is a safety net for the standalone page, which has no separate pre-check.)
+    if (trimmedTicker.includes('.')) {
+      throw new Error('Only US-listed stocks (NYSE, NASDAQ) are currently supported.');
+    }
+
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stockTicker: trimmedTicker,
+        stockCompanyName: companyName,
+        mode: 'investor',
+        subMode: 'public'
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
+    if (data.badge === 'Unknown ticker') throw new Error(`"${trimmedTicker}" could not be found as a recognized ticker.`);
+
+    return { data, name: (companyName || trimmedTicker).trim() };
+  }
+
   async function runCompareScan(ticker, companyName) {
     const errBox = document.getElementById('compare-err-box');
     errBox.style.display = 'none';
@@ -2532,8 +2611,6 @@
       return;
     }
 
-    // Non-US listings use a dot-suffixed symbol (e.g. "005930.KS", "7203.T") — reject
-    // before hitting the API since only NYSE/NASDAQ-listed stocks are supported right now.
     if (trimmedTicker.includes('.')) {
       errBox.textContent = '⚠ Only US-listed stocks (NYSE, NASDAQ) are currently supported.';
       errBox.style.display = 'block';
@@ -2545,30 +2622,14 @@
     document.getElementById('compare-search-area').style.display = 'none';
     document.getElementById('compare-loading').style.display = 'block';
 
-    const displayName = (companyName || trimmedTicker).trim();
-
     try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stockTicker: trimmedTicker,
-          stockCompanyName: companyName,
-          mode: 'investor',
-          subMode: 'public'
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
-      if (data.badge === 'Unknown ticker') throw new Error(`"${trimmedTicker}" could not be found as a recognized ticker.`);
-
+      const { data, name } = await fetchCompareData(trimmedTicker, companyName);
       compareStockData = data;
-      compareStockName = displayName;
-      renderComparison(scanData, currentScanBizName, compareStockData, compareStockName);
+      compareStockName = name;
+      await renderComparison(scanData, currentScanBizName, compareStockData, compareStockName, 'compare-result-area', 'compare-loading');
 
       if (currentUser) {
-        await saveScanAndIncrement(displayName, 'Public stock', data);
+        await saveScanAndIncrement(name, 'Public stock', data);
       } else if (isGuest) {
         guestScanCount += 1;
       }
@@ -2580,6 +2641,8 @@
     }
   }
 
+  // Deterministic fallback winner/reason — used ONLY when /api/compare-verdict fails or
+  // returns malformed output, so the verdict section never goes empty.
   function computeComparisonWinner(a, b) {
     const combinedA = Math.round(((a.score || 0) + (a.stockAnalysis?.safetyScore ?? 50)) / 2);
     const combinedB = Math.round(((b.score || 0) + (b.stockAnalysis?.safetyScore ?? 50)) / 2);
@@ -2611,53 +2674,175 @@
     return `${winnerName} looks like the stronger pick right now, with ${reasonText}.`;
   }
 
-  function renderCompareColumn(name, d, isWinner) {
+  function renderCompareColumn(name, d, other, isWinner) {
     const sa = d.stockAnalysis || {};
+    const otherSa = other.stockAnalysis || {};
+    const rm = d.rawMetrics || {};
+    const otherRm = other.rawMetrics || {};
     const signalLower = (sa.signal || '').toLowerCase();
     const signalClass = signalLower === 'buy' ? 'buy' : signalLower === 'sell' ? 'sell' : 'hold';
+
+    const higherBetter = (mine, theirs) => (mine == null || theirs == null || mine === theirs) ? '' : (mine > theirs ? 'better' : 'worse');
+    const lowerBetter = (mine, theirs) => (mine == null || theirs == null || mine === theirs) ? '' : (mine < theirs ? 'better' : 'worse');
+
+    const flags = Array.isArray(d.redFlags) ? d.redFlags : [];
+    const redFlagsHtml = flags.length
+      ? `<div class="compare-redflags"><div class="compare-redflags-label">Red flags</div>${flags.map(f => `<span class="severity-badge ${['high','medium','low'].includes(f.severity) ? f.severity : 'medium'}">${escapeHtml(f.name || '')}</span>`).join('')}</div>`
+      : `<div class="compare-redflags compare-redflags-label">✓ No red flags detected</div>`;
+
     return `
       <div class="compare-col ${isWinner ? 'winner' : ''}">
         <div class="compare-col-title">
           <span>${escapeHtml(name)}</span>
           ${isWinner ? '<span style="color:var(--green); font-size:12px;">🏆 Winner</span>' : ''}
         </div>
-        <div class="compare-row"><span class="cr-label">Business health</span><span class="cr-val">${d.score ?? '—'}/100</span></div>
-        <div class="compare-row"><span class="cr-label">Stock safety score</span><span class="cr-val">${sa.safetyScore ?? '—'}/100</span></div>
+        <div class="compare-row"><span class="cr-label">Business health</span><span class="cr-val ${higherBetter(d.score, other.score)}">${d.score ?? '—'}/100</span></div>
+        <div class="compare-row"><span class="cr-label">Stock safety score</span><span class="cr-val ${higherBetter(sa.safetyScore, otherSa.safetyScore)}">${sa.safetyScore ?? '—'}/100</span></div>
         <div class="compare-row"><span class="cr-label">Signal</span><span class="cr-val"><span class="signal-badge ${signalClass}">${escapeHtml(sa.signal || '—')}</span></span></div>
         <div class="compare-row"><span class="cr-label">Valuation</span><span class="cr-val">${escapeHtml(sa.valuation?.verdict || '—')}</span></div>
         <div class="compare-row"><span class="cr-label">Momentum</span><span class="cr-val">${escapeHtml(sa.momentum?.trend || '—')}</span></div>
         <div class="compare-row"><span class="cr-label">Dividend</span><span class="cr-val">${sa.dividend?.paysDividend ? escapeHtml(sa.dividend.yield) : 'None'}</span></div>
+        <div class="compare-row"><span class="cr-label">D/E ratio</span><span class="cr-val ${lowerBetter(rm.debtEquityRaw, otherRm.debtEquityRaw)}">${rm.debtEquityRaw != null ? rm.debtEquityRaw.toFixed(2) : '—'}</span></div>
+        <div class="compare-row"><span class="cr-label">Current ratio</span><span class="cr-val ${higherBetter(rm.currentRatioRaw, otherRm.currentRatioRaw)}">${rm.currentRatioRaw != null ? rm.currentRatioRaw.toFixed(2) : '—'}</span></div>
+        <div class="compare-row"><span class="cr-label">ROE</span><span class="cr-val ${higherBetter(rm.roeRaw, otherRm.roeRaw)}">${rm.roeRaw != null ? rm.roeRaw.toFixed(1) + '%' : '—'}</span></div>
+        ${redFlagsHtml}
       </div>`;
   }
 
-  function renderComparison(a, nameA, b, nameB) {
-    document.getElementById('compare-loading').style.display = 'none';
-    const resultArea = document.getElementById('compare-result-area');
+  // Renders the metrics grid immediately, then fetches the AI verdict and fills it in —
+  // falling back to the deterministic winner/reason if the AI call fails or returns
+  // malformed output, so the verdict section never goes empty. `resultAreaId`/`loadingId`
+  // let this same function serve both the from-scan-report flow and the standalone page,
+  // which use different container elements.
+  async function renderComparison(a, nameA, b, nameB, resultAreaId, loadingId) {
+    document.getElementById(loadingId).style.display = 'none';
+    const resultArea = document.getElementById(resultAreaId);
     resultArea.style.display = 'block';
 
-    const { winner } = computeComparisonWinner(a, b);
-    const reasonText = buildComparisonReason(nameA, a, nameB, b, winner);
-
     resultArea.innerHTML = `
-      <div class="compare-winner-banner">
+      <div class="compare-verdict-card" id="${resultAreaId}-verdict">Generating AI verdict…</div>
+      <div class="compare-grid">
+        ${renderCompareColumn(nameA, a, b, false)}
+        ${renderCompareColumn(nameB, b, a, false)}
+      </div>
+      <button class="rescan-btn" style="margin-top:12px;" onclick="resetCompare('${resultAreaId}')">Compare with a different stock</button>
+    `;
+
+    let verdict = null;
+    try {
+      const res = await fetch('/api/compare-verdict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nameA, a, nameB, b })
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) verdict = data;
+    } catch (e) {
+      // Non-fatal: falls back to the deterministic verdict below
+    }
+
+    // Guard against the user navigating away / re-running the comparison before this resolved.
+    const banner = document.getElementById(`${resultAreaId}-verdict`);
+    if (!banner) return;
+    const grid = resultArea.querySelector('.compare-grid');
+
+    if (verdict) {
+      const winnerName = verdict.winner === 'a' ? nameA : verdict.winner === 'b' ? nameB : null;
+      banner.innerHTML = `
+        <div>${winnerName ? '🏆 ' : '🤝 '}<strong>${escapeHtml(verdict.verdictSentence)}</strong></div>
+        <ul class="compare-verdict-reasons">${verdict.reasons.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
+        <div style="margin-top:8px;"><strong>Risk to watch:</strong> ${escapeHtml(verdict.riskToWatch)}</div>
+        <div style="margin-top:4px;"><strong>Where the other might win:</strong> ${escapeHtml(verdict.otherScenario)}</div>
+      `;
+      if (grid) grid.innerHTML = `${renderCompareColumn(nameA, a, b, verdict.winner === 'a')}${renderCompareColumn(nameB, b, a, verdict.winner === 'b')}`;
+    } else {
+      const { winner } = computeComparisonWinner(a, b);
+      const reasonText = buildComparisonReason(nameA, a, nameB, b, winner);
+      banner.innerHTML = `
         ${winner ? `🏆 <strong>${escapeHtml(winner === 'a' ? nameA : nameB)}</strong> looks like the stronger pick.` : `🤝 It's close — both look similarly attractive right now.`}
         <div style="margin-top:4px; color:var(--muted); font-size:12px;">${escapeHtml(reasonText)}</div>
-      </div>
-      <div class="compare-grid">
-        ${renderCompareColumn(nameA, a, winner === 'a')}
-        ${renderCompareColumn(nameB, b, winner === 'b')}
-      </div>
-      <button class="rescan-btn" style="margin-top:12px;" onclick="resetCompare()">Compare with a different stock</button>
-    `;
+      `;
+      if (grid) grid.innerHTML = `${renderCompareColumn(nameA, a, b, winner === 'a')}${renderCompareColumn(nameB, b, a, winner === 'b')}`;
+    }
   }
 
-  function resetCompare() {
+  function resetCompare(resultAreaId) {
+    if (resultAreaId === 'standalone-compare-result-area') {
+      document.getElementById('standalone-compare-result-area').style.display = 'none';
+      document.getElementById('standalone-compare-result-area').innerHTML = '';
+      document.getElementById('standalone-compare-form-card').style.display = 'block';
+      return;
+    }
     compareStockData = null;
     compareStockName = '';
     document.getElementById('compare-result-area').style.display = 'none';
     document.getElementById('compare-result-area').innerHTML = '';
     document.getElementById('compare-ticker').value = '';
     showCompareSearch();
+  }
+
+  // ── STANDALONE COMPARE PAGE (no prior scan required) ──
+  let standaloneCompareA = { ticker: '', name: '' };
+  let standaloneCompareB = { ticker: '', name: '' };
+
+  function openStandaloneComparePage() {
+    show('s-compare');
+    document.getElementById('standalone-compare-form-card').style.display = 'block';
+    document.getElementById('standalone-compare-result-area').style.display = 'none';
+    document.getElementById('standalone-compare-result-area').innerHTML = '';
+    document.getElementById('standalone-compare-err').style.display = 'none';
+  }
+
+  function selectStandaloneCompareTicker(contextId, symbol, description) {
+    const side = contextId === 'standalone-compare-a' ? 'a' : 'b';
+    const inputId = side === 'a' ? 'standalone-compare-a' : 'standalone-compare-b';
+    const dropdownId = `${inputId}-dropdown`;
+    document.getElementById(inputId).value = symbol;
+    document.getElementById(dropdownId).style.display = 'none';
+    if (side === 'a') standaloneCompareA = { ticker: symbol, name: description };
+    else standaloneCompareB = { ticker: symbol, name: description };
+  }
+
+  async function runStandaloneCompare() {
+    const errBox = document.getElementById('standalone-compare-err');
+    errBox.style.display = 'none';
+
+    const tickerA = (standaloneCompareA.ticker || document.getElementById('standalone-compare-a').value.trim().toUpperCase());
+    const tickerB = (standaloneCompareB.ticker || document.getElementById('standalone-compare-b').value.trim().toUpperCase());
+
+    if (!tickerA || !tickerB) {
+      errBox.textContent = '⚠ Please enter both companies to compare.';
+      errBox.style.display = 'block';
+      return;
+    }
+    if (tickerA === tickerB) {
+      errBox.textContent = '⚠ Please choose two different companies.';
+      errBox.style.display = 'block';
+      return;
+    }
+    if (!(await checkScanAllowed('standalone-compare-err'))) return;
+
+    document.getElementById('standalone-compare-form-card').style.display = 'none';
+    document.getElementById('standalone-compare-loading').style.display = 'block';
+
+    try {
+      const [sideA, sideB] = await Promise.all([
+        fetchCompareData(tickerA, standaloneCompareA.name),
+        fetchCompareData(tickerB, standaloneCompareB.name)
+      ]);
+      await renderComparison(sideA.data, sideA.name, sideB.data, sideB.name, 'standalone-compare-result-area', 'standalone-compare-loading');
+
+      if (currentUser) {
+        await saveScanAndIncrement(sideA.name, 'Public stock', sideA.data);
+      } else if (isGuest) {
+        guestScanCount += 1;
+      }
+    } catch (e) {
+      document.getElementById('standalone-compare-loading').style.display = 'none';
+      document.getElementById('standalone-compare-form-card').style.display = 'block';
+      errBox.textContent = 'Something went wrong: ' + e.message;
+      errBox.style.display = 'block';
+    }
   }
 
   // ── AI NEWS FEED ──
