@@ -172,6 +172,20 @@
     .news-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
     .news-note { font-size: 12px; color: var(--muted); line-height: 1.5; }
 
+    .portfolio-summary-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .portfolio-summary-card { flex: 1; min-width: 220px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+    .portfolio-redflag-list { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
+    .portfolio-holding { padding: 14px 4px; border-bottom: 1px solid var(--border); }
+    .portfolio-holding:last-child { border-bottom: none; }
+    .portfolio-holding-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 10px; }
+    .portfolio-holding-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .portfolio-holding-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; }
+    .ph-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; display: block; margin-bottom: 2px; }
+    .ph-value { font-size: 13px; font-weight: 600; color: var(--text); }
+    .ph-value.up { color: var(--green); }
+    .ph-value.down { color: var(--red); }
+    .weakest-badge { font-size: 10px; font-weight: 600; text-transform: uppercase; background: var(--red-dim); color: var(--red); padding: 3px 9px; border-radius: 20px; border: 1px solid rgba(239,68,68,0.25); flex-shrink: 0; }
+
     /* STOCK COMPARISON */
     .compare-winner-banner { background: var(--accent-dim); border: 1px solid var(--accent-glow); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px; font-size: 13px; overflow-wrap: break-word; word-break: break-word; }
     .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
@@ -934,6 +948,75 @@
   </div>
 </div>
 
+<!-- SCREEN 6: PORTFOLIO HEALTH DASHBOARD -->
+<div class="screen" id="s-portfolio">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Portfolio Health</h2>
+      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+    </div>
+
+    <div class="portfolio-summary-row">
+      <div class="portfolio-summary-card">
+        <div class="score-card" style="border:none; background:none; padding:0;">
+          <div class="score-ring-wrap">
+            <canvas id="portfolio-score-canvas" width="96" height="96"></canvas>
+            <div class="score-center">
+              <span class="score-num" id="portfolio-agg-score">—</span>
+              <span class="score-denom">/100</span>
+            </div>
+          </div>
+          <div class="score-detail">
+            <h3>Aggregate health</h3>
+            <p style="font-size:12px; color:var(--muted);">Weighted by current position size</p>
+          </div>
+        </div>
+      </div>
+      <div class="portfolio-summary-card">
+        <div class="section-title">Red flag exposure</div>
+        <div id="portfolio-redflag-total" style="font-size:20px; font-weight:600;">—</div>
+        <div class="portfolio-redflag-list" id="portfolio-redflag-breakdown"></div>
+      </div>
+    </div>
+
+    <div class="dive-card">
+      <div class="dive-body">
+        <div class="section-title">AI portfolio verdict</div>
+        <p id="portfolio-verdict-text" style="font-size:13px; color:var(--text); line-height:1.6;">Loading…</p>
+      </div>
+    </div>
+
+    <div class="dive-card">
+      <div class="dive-body">
+        <div class="section-title">Holdings</div>
+        <div id="portfolio-holdings-list">
+          <div class="history-loading">Loading portfolio…</div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn-outline" id="add-holding-cta-btn" style="width:100%; margin-bottom:1.25rem;" onclick="showAddHoldingForm()">+ Add holding</button>
+    <div class="dive-card" id="add-holding-form-area" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Add a holding</div>
+        <div class="search-wrap" style="margin-bottom:10px;">
+          <input type="text" id="portfolio-add-ticker" placeholder="Search company or ticker (e.g. Apple or AAPL)" autocomplete="off" oninput="onStockSearchInput(this.value, 'portfolio-add', 'portfolio-add-dropdown')" onfocus="onStockSearchInput(this.value, 'portfolio-add', 'portfolio-add-dropdown')" />
+          <div class="search-dropdown" id="portfolio-add-dropdown" style="display:none;"></div>
+        </div>
+        <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
+          <input type="number" id="portfolio-add-shares" placeholder="Shares" step="0.0001" min="0" />
+          <input type="number" id="portfolio-add-price" placeholder="Purchase price ($)" step="0.01" min="0" />
+        </div>
+        <div class="action-row">
+          <button class="btn-outline" onclick="hideAddHoldingForm()">Cancel</button>
+          <button class="btn btn-accent" style="flex:1;" onclick="saveHolding()">Save holding</button>
+        </div>
+        <div class="err" id="add-holding-err" style="display:none; margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── SUPABASE SETUP ──
   const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
@@ -1202,6 +1285,7 @@
       navAuth.innerHTML = `
         <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">🔔<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
         <button class="nav-account-btn" onclick="openWatchlistPage()">☆ Watchlist</button>
+        <button class="nav-account-btn" onclick="openPortfolioPage()">📊 Portfolio</button>
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
         ${effectiveIsPro() ? '<span class="pro-pill">' + (isPro ? 'PRO' : 'PRO PREVIEW') + '</span>' : ''}
       `;
@@ -2308,6 +2392,7 @@
       const r = ctx && ctx.results[Number(item.dataset.idx)];
       if (r) {
         if (contextId === 'compare') selectCompareSearchResult(r.symbol, r.description);
+        else if (contextId === 'portfolio-add') selectPortfolioTicker(r.symbol, r.description);
         else selectStockSearchResult(r.symbol, r.description);
       }
       return;
@@ -2638,6 +2723,303 @@
       return;
     }
     listEl.innerHTML = newsPageData.map(renderNewsRow).join('');
+  }
+
+  // ── PORTFOLIO HEALTH DASHBOARD ──
+  const PORTFOLIO_SCORE_CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours — avoids re-spending a
+                                                            // Groq+Finnhub call every page open
+  let portfolioAddTicker = '', portfolioAddName = '';
+
+  function getCachedApexScore(ticker) {
+    try {
+      const raw = sessionStorage.getItem(`apex_score_cache:${ticker}`);
+      if (!raw) return null;
+      const { data, cachedAt } = JSON.parse(raw);
+      if (Date.now() - cachedAt > PORTFOLIO_SCORE_CACHE_TTL_MS) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  function setCachedApexScore(ticker, data) {
+    try {
+      sessionStorage.setItem(`apex_score_cache:${ticker}`, JSON.stringify({ data, cachedAt: Date.now() }));
+    } catch {
+      // Non-fatal: sessionStorage may be full/unavailable, just skip caching
+    }
+  }
+
+  async function fetchApexScoreForHolding(ticker, companyName) {
+    const cached = getCachedApexScore(ticker);
+    if (cached) return cached;
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stockTicker: ticker, stockCompanyName: companyName, mode: 'investor', subMode: 'public' })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) return null;
+      const result = { score: data.score ?? null, redFlagCount: Array.isArray(data.redFlags) ? data.redFlags.length : 0 };
+      setCachedApexScore(ticker, result);
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
+  // Weighted by CURRENT market value (shares * currentPrice), not cost basis — portfolio
+  // health is a present-tense question about what's actually held today. Falls back to
+  // purchase price for a single holding's weight only if its quote failed, rather than
+  // silently excluding it (which would understate real exposure).
+  function computePortfolioAggregate(rows) {
+    let weightedSum = 0, totalWeight = 0, totalRedFlags = 0, weakest = null;
+    for (const r of rows) {
+      if (typeof r.apexScore !== 'number') continue;
+      const price = typeof r.currentPrice === 'number' ? r.currentPrice : r.purchasePrice;
+      const weight = r.shares * price;
+      weightedSum += weight * r.apexScore;
+      totalWeight += weight;
+      totalRedFlags += r.redFlagCount || 0;
+      if (!weakest || r.apexScore < weakest.apexScore) weakest = r;
+    }
+    const aggregateScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null;
+    return { aggregateScore, totalRedFlags, weakest };
+  }
+
+  function openPortfolioPage() {
+    show('s-portfolio');
+    loadPortfolioPage();
+  }
+
+  async function loadPortfolioPage() {
+    const listEl = document.getElementById('portfolio-holdings-list');
+    const verdictEl = document.getElementById('portfolio-verdict-text');
+    listEl.innerHTML = '<div class="history-loading">Loading portfolio…</div>';
+    verdictEl.textContent = 'Loading…';
+    document.getElementById('portfolio-agg-score').textContent = '—';
+    document.getElementById('portfolio-redflag-total').textContent = '—';
+    document.getElementById('portfolio-redflag-breakdown').innerHTML = '';
+
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your portfolio.</div>';
+      verdictEl.textContent = '';
+      return;
+    }
+
+    let rows;
+    try {
+      const { data, error } = await sb
+        .from('portfolio_holdings')
+        .select('id, ticker, company_name, shares, purchase_price, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      rows = data || [];
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your portfolio. Please try again.</div>';
+      verdictEl.textContent = '';
+      return;
+    }
+
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="history-empty">No holdings yet — add one below to start tracking your portfolio\'s health.</div>';
+      verdictEl.textContent = 'Add a holding to see your portfolio verdict.';
+      return;
+    }
+
+    // Enriched holdings, starting with just the DB-stored fields — price/score patched in below.
+    let holdings = rows.map(r => ({
+      id: r.id, ticker: r.ticker, companyName: r.company_name || r.ticker,
+      shares: Number(r.shares), purchasePrice: Number(r.purchase_price),
+      currentPrice: null, apexScore: null, redFlagCount: null
+    }));
+    listEl.innerHTML = holdings.map(h => renderHoldingRow(h, false)).join('');
+
+    const tickers = [...new Set(holdings.map(h => h.ticker))];
+
+    const [quotesResult] = await Promise.all([
+      fetch(`/api/watchlist-quotes?tickers=${encodeURIComponent(tickers.join(','))}`).then(r => r.json()).catch(() => ({ quotes: {} })),
+      Promise.all(holdings.map(async (h) => {
+        const scoreData = await fetchApexScoreForHolding(h.ticker, h.companyName);
+        if (scoreData) {
+          h.apexScore = scoreData.score;
+          h.redFlagCount = scoreData.redFlagCount;
+        }
+      }))
+    ]);
+
+    const quotes = quotesResult.quotes || {};
+    holdings = holdings.map(h => {
+      const q = quotes[h.ticker];
+      return {
+        ...h,
+        currentPrice: q && typeof q.price === 'number' ? q.price : null
+      };
+    });
+
+    const { aggregateScore, totalRedFlags, weakest } = computePortfolioAggregate(holdings);
+
+    listEl.innerHTML = holdings.map(h => renderHoldingRow(h, weakest && h.id === weakest.id)).join('');
+
+    if (aggregateScore != null) {
+      document.getElementById('portfolio-agg-score').textContent = aggregateScore;
+      drawRing('portfolio-score-canvas', aggregateScore, 70, 45);
+    }
+    document.getElementById('portfolio-redflag-total').textContent = `${totalRedFlags} red flag${totalRedFlags === 1 ? '' : 's'} across ${holdings.length} holding${holdings.length === 1 ? '' : 's'}`;
+    document.getElementById('portfolio-redflag-breakdown').innerHTML = holdings
+      .filter(h => h.redFlagCount)
+      .map(h => `<div>${escapeHtml(h.ticker)}: ${h.redFlagCount} red flag${h.redFlagCount === 1 ? '' : 's'}</div>`)
+      .join('');
+
+    // AI verdict — independent async, doesn't block the table from showing.
+    if (aggregateScore != null) {
+      loadPortfolioVerdict(holdings, aggregateScore);
+    } else {
+      verdictEl.textContent = 'Not enough data to generate a verdict yet.';
+    }
+  }
+
+  async function loadPortfolioVerdict(holdings, aggregateScore) {
+    const verdictEl = document.getElementById('portfolio-verdict-text');
+    try {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('Not logged in');
+
+      const res = await fetch('/api/portfolio-verdict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          holdings: holdings.map(h => ({
+            ticker: h.ticker, companyName: h.companyName, shares: h.shares, purchasePrice: h.purchasePrice,
+            currentPrice: h.currentPrice, apexScore: h.apexScore, redFlagCount: h.redFlagCount,
+            gainLossPct: h.currentPrice != null ? ((h.currentPrice - h.purchasePrice) / h.purchasePrice) * 100 : null
+          })),
+          aggregateScore
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Could not load verdict');
+      verdictEl.textContent = data.verdict;
+    } catch (e) {
+      verdictEl.textContent = `Your portfolio's weighted average APEX score is ${aggregateScore}/100. Review the holdings table below for details.`;
+    }
+  }
+
+  function renderHoldingRow(h, isWeakest) {
+    const ticker = escapeHtml(h.ticker);
+    const companyName = escapeHtml(h.companyName);
+    const gainLoss = h.currentPrice != null ? (h.currentPrice - h.purchasePrice) * h.shares : null;
+    const gainLossPct = h.currentPrice != null ? ((h.currentPrice - h.purchasePrice) / h.purchasePrice) * 100 : null;
+    const gainLossClass = gainLoss == null ? '' : gainLoss >= 0 ? 'up' : 'down';
+    const gainLossText = gainLoss == null ? '—' : `${gainLoss >= 0 ? '+' : ''}$${gainLoss.toFixed(2)} (${gainLossPct >= 0 ? '+' : ''}${gainLossPct.toFixed(1)}%)`;
+    const weakestBadge = isWeakest ? '<span class="weakest-badge">⚠ Weakest link</span>' : '';
+
+    return `
+      <div class="portfolio-holding">
+        <div class="portfolio-holding-top">
+          <div class="portfolio-holding-name">
+            <span class="watchlist-ticker">${ticker}</span>
+            <span class="watchlist-name">${companyName}</span>
+            ${weakestBadge}
+          </div>
+          <button class="watchlist-remove-btn" data-id="${h.id}" onclick="removeHoldingBtn(this)" title="Remove">✕</button>
+        </div>
+        <div class="portfolio-holding-stats">
+          <div><span class="ph-label">Shares</span><span class="ph-value">${h.shares}</span></div>
+          <div><span class="ph-label">Cost</span><span class="ph-value">$${h.purchasePrice.toFixed(2)}</span></div>
+          <div><span class="ph-label">Current</span><span class="ph-value">${h.currentPrice != null ? '$' + h.currentPrice.toFixed(2) : '—'}</span></div>
+          <div><span class="ph-label">Gain/Loss</span><span class="ph-value ${gainLossClass}">${gainLossText}</span></div>
+          <div><span class="ph-label">APEX Score</span><span class="ph-value">${h.apexScore ?? '—'}</span></div>
+          <div><span class="ph-label">Red Flags</span><span class="ph-value">${h.redFlagCount ?? '—'}</span></div>
+        </div>
+      </div>`;
+  }
+
+  function showAddHoldingForm() {
+    document.getElementById('add-holding-cta-btn').style.display = 'none';
+    document.getElementById('add-holding-form-area').style.display = 'block';
+    document.getElementById('add-holding-err').style.display = 'none';
+    portfolioAddTicker = '';
+    portfolioAddName = '';
+    document.getElementById('portfolio-add-ticker').value = '';
+    document.getElementById('portfolio-add-shares').value = '';
+    document.getElementById('portfolio-add-price').value = '';
+  }
+
+  function hideAddHoldingForm() {
+    document.getElementById('add-holding-cta-btn').style.display = 'block';
+    document.getElementById('add-holding-form-area').style.display = 'none';
+  }
+
+  function selectPortfolioTicker(symbol, description) {
+    portfolioAddTicker = symbol;
+    portfolioAddName = description;
+    document.getElementById('portfolio-add-ticker').value = symbol;
+    document.getElementById('portfolio-add-dropdown').style.display = 'none';
+  }
+
+  async function saveHolding() {
+    const errEl = document.getElementById('add-holding-err');
+    errEl.style.display = 'none';
+
+    const tickerInput = document.getElementById('portfolio-add-ticker').value.trim().toUpperCase();
+    const ticker = portfolioAddTicker || tickerInput;
+    const shares = parseFloat(document.getElementById('portfolio-add-shares').value);
+    const purchasePrice = parseFloat(document.getElementById('portfolio-add-price').value);
+
+    if (!ticker) {
+      errEl.textContent = 'Please select a ticker from the search results.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (ticker.includes('.')) {
+      errEl.textContent = 'Only US-listed stocks (NYSE, NASDAQ) are currently supported.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!shares || shares <= 0) {
+      errEl.textContent = 'Please enter a valid number of shares.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!Number.isFinite(purchasePrice) || purchasePrice < 0) {
+      errEl.textContent = 'Please enter a valid purchase price.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    try {
+      const { error } = await sb.from('portfolio_holdings').insert({
+        user_id: currentUser.id,
+        ticker,
+        company_name: portfolioAddName || ticker,
+        shares,
+        purchase_price: purchasePrice
+      });
+      if (error) throw error;
+      hideAddHoldingForm();
+      loadPortfolioPage();
+    } catch (e) {
+      errEl.textContent = 'Could not save this holding — please try again.';
+      errEl.style.display = 'block';
+    }
+  }
+
+  async function removeHolding(id) {
+    if (!currentUser) return;
+    try {
+      await sb.from('portfolio_holdings').delete().eq('id', id).eq('user_id', currentUser.id);
+      loadPortfolioPage();
+    } catch (e) {
+      // Non-fatal: leave the list as-is, user can retry
+    }
+  }
+
+  function removeHoldingBtn(btn) {
+    removeHolding(btn.dataset.id);
   }
 
   // ── SAVE SCAN TO HISTORY + INCREMENT COUNT ──
