@@ -368,7 +368,11 @@
     .pw-note { font-size: 11px; color: var(--dim); margin-top: 8px; }
 
     /* AUTH */
-    .nav-auth { display: flex; align-items: center; gap: 10px; }
+    .nav-auth { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
+    @media (max-width: 640px) {
+      nav { padding: 1rem; flex-wrap: wrap; row-gap: 10px; }
+      .nav-account-btn { padding: 6px 10px; font-size: 12px; }
+    }
     .nav-account-btn { font-size: 13px; color: var(--text); background: var(--card); border: 1px solid var(--border); padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: border-color 0.15s; }
     .nav-account-btn:hover { border-color: var(--border-hover); }
     .pro-pill { font-size: 11px; background: var(--green-dim); color: var(--green); padding: 3px 9px; border-radius: 20px; border: 1px solid rgba(21,131,122,0.25); }
@@ -1057,7 +1061,43 @@
   </div>
 </div>
 
-<!-- SCREEN 7: STANDALONE COMPARE -->
+<!-- SCREEN 7: APEX AGENT — proactive monitoring feed + entry point to the portfolio-aware chat -->
+<div class="screen" id="s-agent">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>APEX Agent</h2>
+      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+    </div>
+
+    <div class="dive-card">
+      <div class="dive-body">
+        <div class="section-title">What it does</div>
+        <p style="font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:14px;">
+          APEX Agent watches your watchlist and portfolio in the background — re-checking the
+          APEX score, sector-calibrated sub-scores, and red flags for everything you track, and
+          alerting you here when something meaningful changes. It also remembers your actual
+          holdings when you chat, so questions like "how's my portfolio doing" or "what changed"
+          get a real answer instead of a generic one.
+        </p>
+        <button class="btn btn-accent btn-full" onclick="openPortfolioChat()">💬 Chat with APEX Agent</button>
+        <p style="font-size:11px; color:var(--dim); margin-top:10px; text-align:center;">
+          Informational only — APEX Agent never places trades or takes action on your behalf.
+        </p>
+      </div>
+    </div>
+
+    <div class="dive-card">
+      <div class="dive-body">
+        <div class="section-title">Recent alerts</div>
+        <div id="agent-alerts-list">
+          <div class="history-loading">Loading alerts…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 8: STANDALONE COMPARE -->
 <div class="screen" id="s-compare">
   <div class="results-wrap">
     <div class="results-header">
@@ -1366,6 +1406,7 @@
         <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">🔔<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
         <button class="nav-account-btn" onclick="openWatchlistPage()">☆ Watchlist</button>
         <button class="nav-account-btn" onclick="openPortfolioPage()">📊 Portfolio</button>
+        <button class="nav-account-btn" onclick="openAgentPage()">📡 APEX Agent</button>
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
         ${effectiveIsPro() ? '<span class="pro-pill">' + (isPro ? 'PRO' : 'PRO PREVIEW') + '</span>' : ''}
       `;
@@ -2158,6 +2199,63 @@
       updateNotifBadge(0); // optimistic — next poll reconciles with the server anyway
     } catch (e) {
       // Non-fatal: badge count just stays wrong until the next poll/panel open
+    }
+  }
+
+  function openAgentPage() {
+    if (!currentUser) { openAuth('login'); return; }
+    show('s-agent');
+    loadAgentAlerts();
+  }
+
+  // APEX Agent's own feed — same `notifications` table the bell panel reads (loadNotifications
+  // above), just scoped to the two types the daily monitoring cron creates (lib/scoreMonitor.js):
+  // 'score_change' (a watchlist/portfolio holding's APEX score moved meaningfully) and
+  // 'red_flag' (a new medium/high-severity flag showed up on a re-scan). Price alerts and
+  // watchlist-move notifications still show in the general bell panel, not here — this feed is
+  // specifically "what did the agent notice about my holdings' health."
+  async function loadAgentAlerts() {
+    const listEl = document.getElementById('agent-alerts-list');
+    listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your alerts.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('notifications')
+        .select('id, type, ticker, company_name, title, body, read, created_at')
+        .eq('user_id', currentUser.id)
+        .in('type', ['score_change', 'red_flag'])
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+
+      const rows = data || [];
+      if (!rows.length) {
+        listEl.innerHTML = '<div class="history-empty">No alerts yet — add tickers to your watchlist or portfolio and APEX Agent will start watching them. Score/red-flag checks run daily.</div>';
+        return;
+      }
+
+      listEl.innerHTML = rows.map(n => {
+        const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const title = escapeHtml(n.title);
+        const body = escapeHtml(n.body);
+        const stripeColor = n.type === 'red_flag' ? 'var(--red)' : 'var(--accent-2)';
+        const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
+        return `
+          <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">
+            <div class="history-info">
+              <div class="history-biz">${unreadDot}${title}</div>
+              <div class="history-meta">${body} · ${date}</div>
+            </div>
+          </div>`;
+      }).join('');
+
+      await markVisibleNotificationsRead(rows);
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your alerts. Please try again.</div>';
     }
   }
 
