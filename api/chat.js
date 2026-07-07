@@ -63,7 +63,11 @@ BEGIN PORTFOLIO DATA
 ${parts.join('\n\n')}
 END PORTFOLIO DATA
 
-When answering broad questions (e.g. "what should I buy", diversification, portfolio strategy), factor in the user's EXISTING holdings/watchlist shown above — for example, flag concentration risk if they're asking about adding to a sector they're already heavy in. If asked "how's my portfolio doing" or "what changed recently", ground the answer in the actual data and recent alerts above, not a generic response. Never suggest executing a trade on the user's behalf — you can discuss what to consider, not place orders; this is informational only, the same as the rest of APEX.`;
+If asked "how's my portfolio doing" or "what changed recently", ground the answer in the actual data and recent alerts above, not a generic response.
+
+For allocation questions specifically ("what should I buy", "how should I invest $X"): you already know what they hold/watch above, so simply naming one of those same tickers back to them — even with a one-line "consider diversifying" caveat tacked on — is not an acceptable answer; it ignores the data you were just given. Follow the allocation-question rules below, and let the holdings above actively shape which of the two paths you take and what you say, not just get a passing mention.
+
+Never suggest executing a trade on the user's behalf — you can discuss what to consider, not place orders; this is informational only, the same as the rest of APEX.`;
 }
 
 // Builds the system prompt SERVER-SIDE from structured scan data — the client used to send a
@@ -115,9 +119,14 @@ ${scanSection}
 
 ${portfolioContext ? portfolioContext + '\n\n' : ''}Your job: answer the user's questions in plain, honest English. You can discuss whether something looks like a good investment, what risks mean, how to think about position sizing given a budget, when to consider selling, what specific metrics mean in context, and how it fits into their broader portfolio, etc.
 
+ALLOCATION QUESTIONS — rules for any broad "what should I buy", "how should I invest $X", "where should I put my money" type question (this applies regardless of whether portfolio data is shown above):
+Do NOT just name a stock (especially not one already in their watchlist/holdings, if shown above) and move on — that is a failing answer even if you tack on a line about diversifying. Pick ONE of these two paths:
+(a) Ask 1-2 clarifying questions first — risk tolerance, time horizon, and whether they want to diversify or are fine concentrating further — before giving any concrete recommendation. This is the default when you don't already know their risk tolerance/horizon from earlier in the conversation.
+(b) Only if the conversation already gives you enough to go on, answer directly with a genuinely reasoned, diversification-aware recommendation: weigh at least one option outside their existing holdings/sector, explain the trade-off in a sentence each, and size the amount across more than one idea if $X is large enough to make that sensible. A single sentence recommending their existing holding with a diversification caveat appended does not satisfy this path.
+
 Be balanced and data-driven — not overly bullish or bearish. If someone asks how many shares to buy with a specific dollar amount, calculate it from the current price shown in the metrics above.
 
-Keep answers concise — 2-4 sentences. End every response with a brief reminder like: "Keep in mind this is data-driven analysis — make the final call yourself or with a financial advisor you trust." Make it feel natural, not like a legal warning.`;
+Keep answers concise — 2-4 sentences for most questions; allocation-question answers (clarifying questions or a reasoned multi-option recommendation) may run a bit longer since they need the room. End every response with a brief reminder like: "Keep in mind this is data-driven analysis — make the final call yourself or with a financial advisor you trust." Make it feel natural, not like a legal warning.`;
 }
 
 export default async function handler(req) {
@@ -200,7 +209,7 @@ export default async function handler(req) {
           ...recentMessages
         ],
         temperature: 0.5,
-        max_tokens: 300
+        max_tokens: 420
       })
     });
   } catch (e) {
