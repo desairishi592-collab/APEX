@@ -945,7 +945,10 @@
   <div class="results-wrap">
     <div class="results-header">
       <h2>My Watchlist</h2>
-      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+      <div style="display:flex; gap:8px;">
+        <button class="rescan-btn" onclick="openPortfolioChat()">Ask APEX</button>
+        <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+      </div>
     </div>
     <div class="watchlist-page-list" id="watchlist-page-list">
       <div class="history-loading">Loading watchlist…</div>
@@ -971,7 +974,10 @@
   <div class="results-wrap">
     <div class="results-header">
       <h2>Portfolio Health</h2>
-      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+      <div style="display:flex; gap:8px;">
+        <button class="rescan-btn" onclick="openPortfolioChat()">Ask APEX</button>
+        <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+      </div>
     </div>
 
     <div class="portfolio-summary-row">
@@ -3830,15 +3836,7 @@
   let chatMode = 'owner';
   let chatOpen = false;
 
-  function showChatWidget(data, bizName, mode) {
-    chatHistory = [];
-    chatScanData = data;
-    chatBizName = bizName;
-    chatMode = mode;
-    const messages = document.getElementById('chat-messages');
-    messages.innerHTML = '';
-    addChatMessage(`Hey! I just finished analyzing **${bizName}** — scored ${data.score}/100, ${data.status}. Got any questions? I can tell you if it's worth investing in, how many shares you could get with your budget, when to think about selling — anything based on what I just found.`, 'ai');
-
+  function revealChatFab() {
     const fab = document.getElementById('chat-fab');
     fab.style.display = 'flex';
     // Show green dot to indicate new results ready
@@ -3854,6 +3852,33 @@
         setTimeout(() => { bubble.style.display = 'none'; bubble.style.opacity = '1'; }, 400);
       }, 5000);
     }, 800);
+  }
+
+  function showChatWidget(data, bizName, mode) {
+    chatHistory = [];
+    chatScanData = data;
+    chatBizName = bizName;
+    chatMode = mode;
+    const messages = document.getElementById('chat-messages');
+    messages.innerHTML = '';
+    addChatMessage(`Hey! I just finished analyzing **${bizName}** — scored ${data.score}/100, ${data.status}. Got any questions? I can tell you if it's worth investing in, how many shares you could get with your budget, when to think about selling — anything based on what I just found.`, 'ai');
+    revealChatFab();
+  }
+
+  // APEX Agent: opens the same chat widget with no specific scan behind it — for "how's my
+  // portfolio doing" / "what changed" questions asked from the Watchlist or Portfolio pages,
+  // grounded server-side (api/chat.js) in the logged-in user's own saved holdings.
+  function openPortfolioChat() {
+    if (!currentUser) { openAuth('login'); return; }
+    chatHistory = [];
+    chatScanData = null;
+    chatBizName = 'your portfolio';
+    chatMode = 'portfolio';
+    const messages = document.getElementById('chat-messages');
+    messages.innerHTML = '';
+    addChatMessage(`Hey! Ask me anything about your watchlist or portfolio — how it's doing, what's changed recently, or general strategy questions. I'll factor in what you've already got.`, 'ai');
+    revealChatFab();
+    if (!chatOpen) toggleChat();
   }
 
   function toggleChat() {
@@ -3905,7 +3930,9 @@
   async function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
-    if (!text || !chatScanData) return;
+    // chatScanData is only required outside 'portfolio' mode — a portfolio-only chat session
+    // (opened from the Watchlist/Portfolio pages) has no single scan behind it.
+    if (!text || (!chatScanData && chatMode !== 'portfolio')) return;
     input.value = '';
 
     addChatMessage(text, 'user');
@@ -3914,9 +3941,19 @@
     const typing = addTypingIndicator();
 
     try {
+      // If logged in, send the session token so the chatbot can pull in watchlist/portfolio
+      // context server-side (api/chat.js) — omitted entirely for guests, who get the same
+      // scan-only behavior as before.
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentUser) {
+        const { data: sessionData } = await sb.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ messages: chatHistory, scanData: chatScanData, bizName: chatBizName, mode: chatMode })
       });
 

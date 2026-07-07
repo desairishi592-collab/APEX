@@ -1,9 +1,15 @@
 export const config = { runtime: 'edge' };
 
 import { createNotification, hasRecentNotification } from '../lib/notifications.js';
+import { fetchFreshAnalysis } from '../lib/rescan.js';
+import { runScoreMonitor } from '../lib/scoreMonitor.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
+// A full re-score is an LLM + several Finnhub calls per ticker — much heavier than the price-only
+// checks below. This is an early-stage app with modest watchlist/portfolio volume today, but this
+// cap is a defensive circuit breaker against a runaway cron if that ever changes.
+const MAX_TICKERS_PER_RESCAN_RUN = 40;
 
 async function patchAlert(serviceRoleKey, id, updates) {
   try {
@@ -56,20 +62,9 @@ async function fetchQuotes(finnhubKey, tickers) {
 
 // Checks every active price alert against its ticker's live price. Unchanged from the
 // original check-price-alerts.js logic, except it now also creates an in-app
-// notification alongside the existing email when an alert triggers.
-async function checkPriceAlerts(serviceRoleKey, resendKey, priceByTicker) {
-  let alerts;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/price_alerts?select=*&status=eq.active`, {
-      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
-    });
-    if (!res.ok) throw new Error(`Supabase query failed: ${res.status}`);
-    alerts = await res.json();
-  } catch (e) {
-    console.error('Could not load alerts:', e.message);
-    return { checked: 0, triggered: 0, emailed: 0, notified: 0, error: 'Could not load alerts' };
-  }
-
+// notification alongside the existing email when an alert triggers. Rows are fetched once by
+// the handler (alongside watchlist/portfolio rows) rather than queried again here.
+async function checkPriceAlerts(serviceRoleKey, resendKey, priceByTicker, alerts) {
   let triggeredCount = 0, emailedCount = 0, notifiedCount = 0;
 
   for (const alert of alerts) {
@@ -109,20 +104,9 @@ async function checkPriceAlerts(serviceRoleKey, resendKey, priceByTicker) {
 
 // Checks every watchlist row for a >5% single-day move (Finnhub's quote `dp` field is
 // already the percent change vs previous close, so no historical price storage is
-// needed). In-app notification only — no email for this trigger.
-async function checkWatchlistMoves(serviceRoleKey, priceByTicker) {
-  let rows;
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/watchlist?select=*`, {
-      headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
-    });
-    if (!res.ok) throw new Error(`Supabase query failed: ${res.status}`);
-    rows = await res.json();
-  } catch (e) {
-    console.error('Could not load watchlist:', e.message);
-    return { checked: 0, moved: 0, notified: 0, error: 'Could not load watchlist' };
-  }
-
+// needed). In-app notification only — no email for this trigger. Rows are fetched once by the
+// handler (alongside price-alert/portfolio rows) rather than queried again here.
+async function checkWatchlistMoves(serviceRoleKey, priceByTicker, rows) {
   let movedCount = 0, notifiedCount = 0;
 
   for (const row of rows) {
@@ -152,7 +136,9 @@ async function checkWatchlistMoves(serviceRoleKey, priceByTicker) {
 // Runs on a schedule (see vercel.json crons). Folded into one daily invocation rather
 // than a separate cron entry — Vercel's Hobby plan caps a project at 2 cron jobs, and
 // this repo already has 2 (this one + weekly-digest), so a 3rd risked a silent deploy
-// failure. Both checks share one batched Finnhub quote fetch across their tickers.
+// failure. Price alerts + watchlist moves share one batched Finnhub quote fetch across
+// their tickers; the APEX Agent score/red-flag monitoring below shares one re-scan per
+// unique ticker across watchlist + portfolio holdings, same dedup principle.
 export default async function handler(req) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
@@ -172,13 +158,18 @@ export default async function handler(req) {
     });
   }
 
-  let alertRows, watchlistRows;
+  // Full rows fetched once here (rather than inside each check function) so the new score/red-flag
+  // monitoring below can reuse the same watchlist/portfolio rows without a second query.
+  let alertRows, watchlistRows, portfolioRows;
   try {
-    [alertRows, watchlistRows] = await Promise.all([
-      fetch(`${SUPABASE_URL}/rest/v1/price_alerts?select=ticker&status=eq.active`, {
+    [alertRows, watchlistRows, portfolioRows] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/price_alerts?select=*&status=eq.active`, {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
       }).then(r => r.ok ? r.json() : []),
-      fetch(`${SUPABASE_URL}/rest/v1/watchlist?select=ticker`, {
+      fetch(`${SUPABASE_URL}/rest/v1/watchlist?select=*`, {
+        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
+      }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/portfolio_holdings?select=user_id,ticker,company_name,score,safety_score,signal`, {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
       }).then(r => r.ok ? r.json() : [])
     ]);
@@ -189,15 +180,44 @@ export default async function handler(req) {
     });
   }
 
-  const allTickers = [...new Set([...alertRows.map(r => r.ticker), ...watchlistRows.map(r => r.ticker)])];
+  const allTickers = [...new Set([...alertRows.map(r => r.ticker), ...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker)])];
   const priceByTicker = allTickers.length ? await fetchQuotes(finnhubKey, allTickers) : {};
 
   const [priceAlerts, watchlistMoves] = await Promise.all([
-    checkPriceAlerts(serviceRoleKey, resendKey, priceByTicker),
-    checkWatchlistMoves(serviceRoleKey, priceByTicker)
+    checkPriceAlerts(serviceRoleKey, resendKey, priceByTicker, alertRows),
+    checkWatchlistMoves(serviceRoleKey, priceByTicker, watchlistRows)
   ]);
 
-  return new Response(JSON.stringify({ priceAlerts, watchlistMoves }), {
+  // APEX Agent: periodic re-score + red-flag check for watchlist/portfolio holdings, on top of
+  // the price-only checks above. Isolated in its own try/catch so a failure here (e.g. Groq
+  // temporarily down) can't take down the already-working price alerts/watchlist moves.
+  let scoreChanges = { checked: 0, notified: 0 };
+  try {
+    const origin = new URL(req.url).origin;
+    const uniqueTickers = [...new Set([...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker)])]
+      .slice(0, MAX_TICKERS_PER_RESCAN_RUN);
+
+    const freshByTicker = {};
+    await Promise.all(uniqueTickers.map(async (ticker) => {
+      const sourceRow = watchlistRows.find(r => r.ticker === ticker) || portfolioRows.find(r => r.ticker === ticker);
+      const fresh = await fetchFreshAnalysis(origin, ticker, sourceRow?.company_name);
+      if (fresh) freshByTicker[ticker] = fresh;
+    }));
+
+    const [watchlistScoreChanges, portfolioScoreChanges] = await Promise.all([
+      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'watchlist', watchlistRows, freshByTicker),
+      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'portfolio_holdings', portfolioRows, freshByTicker)
+    ]);
+    scoreChanges = {
+      checked: watchlistScoreChanges.checked + portfolioScoreChanges.checked,
+      notified: watchlistScoreChanges.notified + portfolioScoreChanges.notified
+    };
+  } catch (e) {
+    console.error('Score monitoring failed:', e.message);
+    scoreChanges = { checked: 0, notified: 0, error: 'Score monitoring failed' };
+  }
+
+  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }

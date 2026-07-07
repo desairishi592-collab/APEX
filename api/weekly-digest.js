@@ -1,5 +1,7 @@
 export const config = { runtime: 'edge' };
 
+import { fetchFreshAnalysis } from '../lib/rescan.js';
+
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -61,16 +63,10 @@ async function upsertWatchlistSignal(serviceRoleKey, userId, ticker, updates) {
   }
 }
 
-// Re-runs the same public-stock analysis the app itself uses, so "signal changed"
-// means exactly what the user would see if they re-scanned the ticker themselves.
+// Thin wrapper over the shared re-scan helper (lib/rescan.js, also used by the APEX Agent
+// monitoring in api/check-market-alerts.js) — plucks just the fields this digest needs.
 async function fetchFreshSignal(origin, ticker, companyName) {
-  const res = await fetch(`${origin}/api/analyze`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subMode: 'public', stockTicker: ticker, stockCompanyName: companyName })
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
+  const data = await fetchFreshAnalysis(origin, ticker, companyName);
   const sa = data?.stockAnalysis;
   if (!sa || !sa.signal) return null;
   return { signal: sa.signal, safetyScore: sa.safetyScore ?? null, score: data.score ?? null };
