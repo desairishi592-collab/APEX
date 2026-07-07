@@ -63,13 +63,21 @@ Same shape returned by the web app's stock scan, e.g. (truncated):
   "stockAnalysis": { "valuation": {...}, "momentum": {...}, "dividend": {...}, "signal": "Hold", "safetyScore": 61, "verdict": "..." },
   "insiderSentiment": { "sentiment": "Neutral", "summary": "...", "netShares": 0, "buyCount": 1, "sellCount": 2, "recentTransactions": [...] },
   "riskTimeline": [ { "risk": "Valuation correction", "timeframe": "3-6 months", "detail": "...", "severity": "amb" } ],
-  "redFlags": [ { "id": "low_current_ratio", "name": "Current ratio below 1", "severity": "medium", "explanation": "...", "value": "Current ratio: 0.89" } ],
-  "competitors": [ { "ticker": "MSFT", "companyName": "Microsoft Corp" } ]
+  "redFlags": [ { "id": "low_current_ratio", "name": "Current ratio below sector norm", "severity": "medium", "explanation": "...", "value": "Current ratio: 0.89" } ],
+  "competitors": [ { "ticker": "MSFT", "companyName": "Microsoft Corp" } ],
+  "sectorBenchmark": { "sector": "Technology", "matched": true, "note": "Scored against Technology sector peers" }
 }
 ```
 
 `redFlags` is always an array (possibly empty — an empty array means the checks ran and found
 nothing, not that they were skipped).
+
+`sectorBenchmark` describes which sector peer group the score and red flags (debt/equity,
+current ratio, and the deterministic quality score) were benchmarked against, instead of one
+universal threshold for every company — see `lib/sectorBenchmarks.js`. `matched: false` means
+Finnhub's industry classification for this ticker didn't map to a specific sector and a
+general-market fallback was used. This field is additive; scans generated before it existed
+(e.g. old entries in scan history) won't have it.
 
 #### Errors
 

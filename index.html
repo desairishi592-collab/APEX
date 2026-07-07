@@ -889,6 +889,7 @@
     <div class="dive-card" id="r-industry-card">
       <div class="dive-body">
         <div class="section-title">How you compare to similar businesses</div>
+        <div id="r-sector-note" style="display:none; font-size:12px; color:var(--muted); margin:-4px 0 10px;"></div>
         <div id="r-industry-rows"></div>
       </div>
     </div>
@@ -3515,6 +3516,18 @@
         document.getElementById('price-alert-confirmed').style.display = 'none';
       } else {
         priceAlertCard.style.display = 'none';
+      }
+    }
+
+    // Sector-calibrated scoring note — only shown for stock scans that carry the field;
+    // absent on scans stored before this field existed, so it just stays hidden for those.
+    const sectorNote = document.getElementById('r-sector-note');
+    if (sectorNote) {
+      if (d.isPublicStock && d.sectorBenchmark && d.sectorBenchmark.note) {
+        sectorNote.textContent = d.sectorBenchmark.note;
+        sectorNote.style.display = 'block';
+      } else {
+        sectorNote.style.display = 'none';
       }
     }
 
