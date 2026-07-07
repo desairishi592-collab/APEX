@@ -717,6 +717,14 @@
       </div>
     </div>
 
+    <!-- STOCK ONLY: explainable breakdown of the score above into per-category sub-scores with reasons -->
+    <div class="dive-card" id="r-subscores-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Score breakdown</div>
+        <div id="r-subscores-rows"></div>
+      </div>
+    </div>
+
     <!-- STOCK ONLY: separate stock safety score (Buy/Hold/Sell), independent of business health score above -->
     <div class="score-card" id="r-stock-score-card" style="display:none;">
       <div class="score-ring-wrap">
@@ -3288,6 +3296,34 @@
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
     drawRing('score-canvas', d.score, 70, 45);
+
+    // STOCK ONLY: explainable breakdown of the score above — each sub-score reuses the same
+    // sector-benchmark data behind the red flags/industry comparison above, not recomputed.
+    const subScoresCard = document.getElementById('r-subscores-card');
+    const subScoresRows = document.getElementById('r-subscores-rows');
+    if (subScoresCard && subScoresRows) {
+      if (d.isPublicStock && Array.isArray(d.subScores) && d.subScores.length) {
+        subScoresCard.style.display = 'block';
+        subScoresRows.innerHTML = d.subScores.map(s => {
+          const score10 = Math.max(0, Math.min(10, Math.round(Number(s.score)) || 0));
+          const colorClass = score10 >= 7 ? 'grn' : score10 >= 4 ? 'amb' : 'red';
+          return `
+            <div class="percentile-row">
+              <div class="percentile-row-head">
+                <span class="percentile-metric">${escapeHtml(s.category || '')}</span>
+                <span class="percentile-value ${colorClass}">${score10}/10</span>
+              </div>
+              <div class="percentile-bar-track">
+                <div class="percentile-bar-fill ${colorClass}" style="width:${score10 * 10}%;"></div>
+              </div>
+              <div class="percentile-summary">${escapeHtml(s.reason || '')}</div>
+            </div>`;
+        }).join('');
+      } else {
+        subScoresCard.style.display = 'none';
+        subScoresRows.innerHTML = '';
+      }
+    }
 
     const guestNotice = document.getElementById('guest-notice');
     if (guestNotice) {

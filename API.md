@@ -65,7 +65,8 @@ Same shape returned by the web app's stock scan, e.g. (truncated):
   "riskTimeline": [ { "risk": "Valuation correction", "timeframe": "3-6 months", "detail": "...", "severity": "amb" } ],
   "redFlags": [ { "id": "low_current_ratio", "name": "Current ratio below sector norm", "severity": "medium", "explanation": "...", "value": "Current ratio: 0.89" } ],
   "competitors": [ { "ticker": "MSFT", "companyName": "Microsoft Corp" } ],
-  "sectorBenchmark": { "sector": "Technology", "matched": true, "note": "Scored against Technology sector peers" }
+  "sectorBenchmark": { "sector": "Technology", "matched": true, "note": "Scored against Technology sector peers" },
+  "subScores": [ { "category": "Profitability", "score": 8, "scale": "0-10", "reason": "Profit margin of 22.0% is well above typical Technology sector levels (median ~12%); ROE of 28.0% is above typical Technology peers (median ~15%)." } ]
 }
 ```
 
@@ -77,6 +78,13 @@ current ratio, and the deterministic quality score) were benchmarked against, in
 universal threshold for every company — see `lib/sectorBenchmarks.js`. `matched: false` means
 Finnhub's industry classification for this ticker didn't map to a specific sector and a
 general-market fallback was used. This field is additive; scans generated before it existed
+(e.g. old entries in scan history) won't have it.
+
+`subScores` is an explainable breakdown of the overall `score` into named categories (typically
+Profitability, Financial Health, Valuation, Risk (Volatility), Momentum, Red Flags), each with a
+0-10 score and a plain-English reason grounded in the same sector-benchmark data — see
+`lib/subScores.js`. It's additive and doesn't change how `score` itself is computed; a category
+is simply omitted if the underlying metric wasn't available for that ticker.
 (e.g. old entries in scan history) won't have it.
 
 #### Errors
