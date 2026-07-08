@@ -1,4 +1,11 @@
-const CACHE_NAME = 'apex-cache-v1';
+// Bump this on any deploy that changes precached assets (icons, manifest.json) — it's the only
+// thing that forces already-installed users to drop a stale cache. Relying on this alone is
+// fragile (easy to forget, as happened here: the icon rebrand shipped without bumping it, so
+// already-installed users kept the old cached icons indefinitely even after the server-side
+// files changed). The fetch handler below now also uses stale-while-revalidate for static
+// assets specifically so future asset changes self-heal within a reload or two without
+// depending on anyone remembering to bump this string.
+const CACHE_NAME = 'apex-cache-v2';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -49,8 +56,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin static assets (icons, manifest): cache-first, these rarely change.
+  // Same-origin static assets (icons, manifest): stale-while-revalidate, not pure cache-first.
+  // Serves the cached copy immediately if there is one (fast, works offline), but always kicks
+  // off a background fetch to refresh the cache for next time. Pure cache-first would mean an
+  // asset that changes on the server (e.g. a new icon) never reaches an already-installed user
+  // unless the service worker's own script bytes also happen to change on that same deploy — the
+  // exact bug that let stale icons sit cached indefinitely. This makes asset updates self-heal
+  // within a reload or two regardless of whether sw.js itself changed.
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    caches.match(event.request).then((cached) => {
+      const refresh = fetch(event.request)
+        .then((res) => {
+          if (res && res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return res;
+        })
+        .catch(() => cached);
+      return cached || refresh;
+    })
   );
 });
