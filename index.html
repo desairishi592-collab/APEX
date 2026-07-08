@@ -4036,11 +4036,15 @@
   // line — HTML ignores plain "\n" characters by default, so without this, no amount of prompt
   // engineering asking the model for short paragraphs/bullets would actually be visible; the
   // formatting only exists in the escaped source text, never rendered. Only a tiny, fixed set
-  // of patterns is interpreted (bold, blank-line paragraph breaks, "- "/"• " bullet lists) —
-  // safe to run on already-escaped text since none of it can introduce real markup. Walks line
-  // by line (rather than splitting on blank-line blocks first) so a bullet list is recognized
-  // even when it follows an intro line with no blank line before it, which is how the model
-  // often writes e.g. "Here's a breakdown:\n- item\n- item".
+  // of patterns is interpreted (bold, blank-line paragraph breaks, "- "/"* "/"• " bullet lists) —
+  // safe to run on already-escaped text since none of it can introduce real markup. All three
+  // bullet markers are recognized since the model isn't consistent about which one it uses
+  // (confirmed live: it reaches for "* " as often as "- "). A single "* " can't collide with the
+  // "**bold**" pattern above since that's already consumed by the bold replacement before this
+  // ever runs, and italic-style "*word*" (no space after the asterisk) doesn't match either.
+  // Walks line by line (rather than splitting on blank-line blocks first) so a bullet list is
+  // recognized even when it follows an intro line with no blank line before it, which is how the
+  // model often writes e.g. "Here's a breakdown:\n- item\n- item".
   function formatChatText(escapedText) {
     const withBold = escapedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     const rawLines = withBold.split('\n');
@@ -4058,7 +4062,7 @@
     let pendingParagraphBreak = false;
     rawLines.forEach((rawLine) => {
       const line = rawLine.trim();
-      const bulletMatch = line.match(/^[-•]\s+(.+)/);
+      const bulletMatch = line.match(/^[-•*]\s+(.+)/);
       if (bulletMatch) {
         pendingParagraphBreak = false;
         list.push(bulletMatch[1]);
