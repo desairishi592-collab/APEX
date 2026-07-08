@@ -741,6 +741,7 @@
     <div class="dive-card" id="r-subscores-card" style="display:none;">
       <div class="dive-body">
         <div class="section-title">Score breakdown</div>
+        <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">The score above is the weighted average of the categories below (Red Flags is shown for information but isn't weighted into it — a serious flag shouldn't get averaged away by strong numbers elsewhere).</p>
         <div id="r-subscores-rows"></div>
       </div>
     </div>
@@ -3427,10 +3428,14 @@
         subScoresRows.innerHTML = d.subScores.map(s => {
           const score10 = Math.max(0, Math.min(10, Math.round(Number(s.score)) || 0));
           const colorClass = score10 >= 7 ? 'grn' : score10 >= 4 ? 'amb' : 'red';
+          // weightLabel is only present on the categories that actually feed the overall score
+          // (see lib/subScores.js computeOverallScore) — showing it here is what makes the
+          // overall score's math verifiable from the report itself, not a hidden formula.
+          const weightSuffix = s.weightLabel ? ` <span style="color:var(--dim); font-weight:400;">(${escapeHtml(s.weightLabel)})</span>` : '';
           return `
             <div class="percentile-row">
               <div class="percentile-row-head">
-                <span class="percentile-metric">${escapeHtml(s.category || '')}</span>
+                <span class="percentile-metric">${escapeHtml(s.category || '')}${weightSuffix}</span>
                 <span class="percentile-value ${colorClass}">${score10}/10</span>
               </div>
               <div class="percentile-bar-track">
