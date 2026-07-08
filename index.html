@@ -4032,6 +4032,52 @@
     }
   }
 
+  // Turns already-HTML-escaped chat text into real paragraphs/lists instead of one collapsed
+  // line — HTML ignores plain "\n" characters by default, so without this, no amount of prompt
+  // engineering asking the model for short paragraphs/bullets would actually be visible; the
+  // formatting only exists in the escaped source text, never rendered. Only a tiny, fixed set
+  // of patterns is interpreted (bold, blank-line paragraph breaks, "- "/"• " bullet lists) —
+  // safe to run on already-escaped text since none of it can introduce real markup. Walks line
+  // by line (rather than splitting on blank-line blocks first) so a bullet list is recognized
+  // even when it follows an intro line with no blank line before it, which is how the model
+  // often writes e.g. "Here's a breakdown:\n- item\n- item".
+  function formatChatText(escapedText) {
+    const withBold = escapedText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    const rawLines = withBold.split('\n');
+
+    const html = [];
+    let list = [];
+    let lastWasBlock = false; // true right after a <ul> — it already has its own spacing
+    const flushList = () => {
+      if (!list.length) return;
+      html.push('<ul style="margin:4px 0; padding-left:18px;">' + list.map(item => `<li style="margin-bottom:2px;">${item}</li>`).join('') + '</ul>');
+      list = [];
+      lastWasBlock = true;
+    };
+
+    let pendingParagraphBreak = false;
+    rawLines.forEach((rawLine) => {
+      const line = rawLine.trim();
+      const bulletMatch = line.match(/^[-•]\s+(.+)/);
+      if (bulletMatch) {
+        pendingParagraphBreak = false;
+        list.push(bulletMatch[1]);
+        return;
+      }
+      flushList();
+      if (!line) {
+        pendingParagraphBreak = true;
+        return;
+      }
+      if (html.length && !lastWasBlock) html.push(pendingParagraphBreak ? '<br><br>' : '<br>');
+      pendingParagraphBreak = false;
+      lastWasBlock = false;
+      html.push(line);
+    });
+    flushList();
+    return html.join('');
+  }
+
   function addChatMessage(text, role) {
     const messages = document.getElementById('chat-messages');
     const isAI = role === 'ai';
@@ -4039,8 +4085,8 @@
     div.className = 'chat-msg';
     div.style.cssText = `align-self:${isAI ? 'flex-start' : 'flex-end'}; background:${isAI ? 'var(--surface)' : 'var(--accent)'}; border:1px solid ${isAI ? 'var(--border)' : 'transparent'}; border-radius:${isAI ? '12px 12px 12px 2px' : '12px 12px 2px 12px'}; padding:9px 13px; font-size:13px; color:var(--text); max-width:88%; line-height:1.6; word-break:break-word;`;
     // Escape first so nothing in the message (user-typed or AI-generated) can inject markup,
-    // then apply bold-markdown support on the already-safe escaped text.
-    div.innerHTML = escapeHtml(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // then format the already-safe escaped text into real paragraphs/lists.
+    div.innerHTML = formatChatText(escapeHtml(text));
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
     return div;
