@@ -72,33 +72,32 @@ Never suggest executing a trade on the user's behalf — you can discuss what to
 None of the above is an excuse to write a long answer — follow the RESPONSE STYLE rules below regardless of how much context this section gives you.`;
 }
 
-// Builds the system prompt SERVER-SIDE from structured scan data — the client used to send a
-// fully-formed systemPrompt string directly, which meant anyone could POST an arbitrary system
-// prompt and use this as a free, unrestricted LLM proxy unrelated to APEX at all. Now the client
-// can only supply the scan data; the actual instructions given to the model are fixed here.
-function buildChatContext(data, bizName, mode, portfolioContext) {
+// Shared by buildChatContext and buildDraftPrompt — both need the same "here's what the scan
+// actually found" framing, only what's built on top of it differs (open-ended Q&A vs. a single
+// drafted artifact).
+function buildScanSection(data, bizName, mode) {
   const isStock = !!data?.isPublicStock;
   const safeMode = mode === 'investor' ? 'investor' : mode === 'portfolio' ? 'portfolio' : 'owner';
   const safeBizName = typeof bizName === 'string' ? bizName.slice(0, 200) : 'this business';
 
-  let scanSection;
   if (safeMode === 'portfolio' || !data) {
-    scanSection = `The user is asking about their saved watchlist/portfolio in general — there's no single scan open right now. Answer using the portfolio data below.`;
-  } else {
-    const score = data?.score ?? '?';
-    const status = data?.status ?? '?';
-    const summary = typeof data?.summary === 'string' ? data.summary.slice(0, 1000) : '';
-    const metrics = Array.isArray(data?.metrics)
-      ? data.metrics.slice(0, 10).map(m => `${m.label}: ${m.value} — ${m.trend}`).join('\n')
-      : '';
-    const risks = Array.isArray(data?.costCuts)
-      ? data.costCuts.slice(0, 10).map(r => `• ${r.title}: ${r.desc}`).join('\n')
-      : '';
-    const industry = Array.isArray(data?.industryComparison)
-      ? data.industryComparison.slice(0, 10).map(i => `• ${i.label}: ${i.value}`).join('\n')
-      : '';
+    return `The user is asking about their saved watchlist/portfolio in general — there's no single scan open right now. Answer using the portfolio data below.`;
+  }
 
-    scanSection = `A user just completed an APEX ${isStock ? 'stock investment' : safeMode === 'investor' ? 'business investment' : 'business health'} scan. Here are the real results:
+  const score = data?.score ?? '?';
+  const status = data?.status ?? '?';
+  const summary = typeof data?.summary === 'string' ? data.summary.slice(0, 1000) : '';
+  const metrics = Array.isArray(data?.metrics)
+    ? data.metrics.slice(0, 10).map(m => `${m.label}: ${m.value} — ${m.trend}`).join('\n')
+    : '';
+  const risks = Array.isArray(data?.costCuts)
+    ? data.costCuts.slice(0, 10).map(r => `• ${r.title}: ${r.desc}`).join('\n')
+    : '';
+  const industry = Array.isArray(data?.industryComparison)
+    ? data.industryComparison.slice(0, 10).map(i => `• ${i.label}: ${i.value}`).join('\n')
+    : '';
+
+  return `A user just completed an APEX ${isStock ? 'stock investment' : safeMode === 'investor' ? 'business investment' : 'business health'} scan. Here are the real results:
 
 Company/Business: ${safeBizName}
 Score: ${score}/100
@@ -113,7 +112,14 @@ ${risks}
 
 Industry Comparison:
 ${industry}`;
-  }
+}
+
+// Builds the system prompt SERVER-SIDE from structured scan data — the client used to send a
+// fully-formed systemPrompt string directly, which meant anyone could POST an arbitrary system
+// prompt and use this as a free, unrestricted LLM proxy unrelated to APEX at all. Now the client
+// can only supply the scan data; the actual instructions given to the model are fixed here.
+function buildChatContext(data, bizName, mode, portfolioContext) {
+  const scanSection = buildScanSection(data, bizName, mode);
 
   return `You are APEX AI, a financial analysis assistant embedded in the APEX business health scanner.
 
@@ -136,6 +142,47 @@ Do NOT just name a stock (especially not one already in their watchlist/holdings
 Be balanced and data-driven — not overly bullish or bearish. If someone asks how many shares to buy with a specific dollar amount, calculate it from the current price shown in the metrics above.
 
 End every response with a brief reminder on its own line, like: "Just my read on the data — worth a gut check with an advisor too." Make it feel like a natural sign-off, not a legal footer.`;
+}
+
+// "Draft a question, not an answer" actions — deliberately the most conservative agentic
+// behavior APEX offers: the model never gives its own view here, it only produces a question or
+// a neutral note for the USER to review, edit, and decide whether to use. No stance, no
+// recommendation, nothing sent or acted on automatically — a human stays in the loop by
+// construction, the same "propose, don't act" shape as e.g. Public.com requiring explicit
+// approval before an agent executes a trade, just applied informationally instead.
+const DRAFT_PROMPTS = {
+  advisor_question: {
+    label: 'a single question the user can bring to a human financial advisor',
+    maxTokens: 150,
+    task: `Write ONE well-formed question, ending in a question mark — one sentence, two at most — that the user could actually ask a human financial advisor about the specific data above. Ground it in a real number or flag from the data (a metric, sub-score, risk, or industry comparison) — never a generic "should I invest in this" question.
+
+Ask about how to interpret or weigh something (risk, trend, what it implies) — do not name possible fixes, strategies, or courses of action inside the question itself (e.g. no "...should I renegotiate contracts or cut costs?"); that's suggesting solutions, not asking about them. Do not answer the question yourself. Do not state an opinion, a recommendation, or what APEX thinks the answer is. Write only the question, phrased the way a person would actually say it out loud to their advisor.`
+  },
+  research_note: {
+    label: "a short research note for the user's own reference",
+    maxTokens: 280,
+    task: `Write a short note (3-5 sentences, or a few short bullet points for specific figures) that neutrally summarizes what stands out in the data above — for the user to keep as their own talking points, not as a recommendation.
+
+State observations, not conclusions: describe what a metric or flag shows ("X is elevated relative to sector peers", "Y moved from A to B") rather than what to do about it ("you should buy/sell/hold"). Do not state an opinion or a recommendation.`
+  }
+};
+
+// Same scan-context framing as buildChatContext, but aimed at producing exactly one drafted
+// artifact instead of an open-ended reply — see the DRAFT_PROMPTS comment above for why this
+// stays this conservative.
+function buildDraftPrompt(data, bizName, mode, portfolioContext, action) {
+  const scanSection = buildScanSection(data, bizName, mode);
+  const spec = DRAFT_PROMPTS[action];
+
+  return `You are APEX AI, a financial analysis assistant embedded in the APEX business health scanner.
+
+${scanSection}
+
+${portfolioContext ? portfolioContext + '\n\n' : ''}The user asked you to draft ${spec.label}. This is a DRAFT for them to review and edit themselves — never phrase it as "I recommend", "APEX thinks", or any other stance of your own, and never treat it as something you're sending or acting on for them. It should read purely as a question or a neutral observation.
+
+${spec.task}
+
+Output ONLY the draft text itself — no preamble like "Here's a draft:", no closing disclaimer, no markdown headers, no quotation marks wrapping the whole thing.`;
 }
 
 export default async function handler(req) {
@@ -172,9 +219,17 @@ export default async function handler(req) {
     });
   }
 
-  const { messages, scanData, bizName, mode } = body;
+  const { messages, scanData, bizName, mode, action } = body;
   const isPortfolioMode = mode === 'portfolio';
-  if (!Array.isArray(messages) || (!isPortfolioMode && (!scanData || typeof scanData !== 'object'))) {
+  const isDraftAction = action !== undefined && Object.prototype.hasOwnProperty.call(DRAFT_PROMPTS, action);
+  if (action !== undefined && !isDraftAction) {
+    return new Response(JSON.stringify({ error: 'Invalid action' }), {
+      status: 400, headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  // Draft actions are single-shot (no back-and-forth), so they don't need a messages array —
+  // everything else still requires scan or portfolio context to ground the response in.
+  if ((!isDraftAction && !Array.isArray(messages)) || (!isPortfolioMode && (!scanData || typeof scanData !== 'object'))) {
     return new Response(JSON.stringify({ error: 'Missing messages or scanData' }), {
       status: 400, headers: { 'Content-Type': 'application/json' }
     });
@@ -194,14 +249,22 @@ export default async function handler(req) {
     }
   }
 
-  const systemPrompt = buildChatContext(scanData, bizName, mode, portfolioContext);
+  const systemPrompt = isDraftAction
+    ? buildDraftPrompt(scanData, bizName, mode, portfolioContext, action)
+    : buildChatContext(scanData, bizName, mode, portfolioContext);
 
-  // Cap conversation length to avoid abuse, and only pass through well-formed {role, content}
-  // pairs with a bounded content length — never trust the shape/size of client-sent messages.
-  const recentMessages = messages
-    .slice(-10)
-    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-    .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }));
+  // Draft actions carry no conversation — just a fixed instruction to go generate the one
+  // artifact the system prompt above already fully specifies. Otherwise, cap conversation length
+  // to avoid abuse, and only pass through well-formed {role, content} pairs with a bounded
+  // content length — never trust the shape/size of client-sent messages.
+  const recentMessages = isDraftAction
+    ? [{ role: 'user', content: `Draft ${DRAFT_PROMPTS[action].label} now, based on the data above.` }]
+    : messages
+        .slice(-10)
+        .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }));
+
+  const maxTokens = isDraftAction ? DRAFT_PROMPTS[action].maxTokens : 320;
 
   // FALLBACK PROVIDER: same rate-limit-only fallback as lib/groqHelpers.js's callGroqForJson —
   // see that file's module comment for the full rationale and how the Cerebras model was chosen.
@@ -228,7 +291,7 @@ export default async function handler(req) {
 
   let groqRes;
   try {
-    groqRes = await requestChatCompletion('https://api.groq.com/openai/v1/chat/completions', apiKey, 'llama-3.3-70b-versatile', { max_tokens: 320 });
+    groqRes = await requestChatCompletion('https://api.groq.com/openai/v1/chat/completions', apiKey, 'llama-3.3-70b-versatile', { max_tokens: maxTokens });
   } catch (e) {
     console.error('Groq fetch failed:', e.message);
     return new Response(JSON.stringify({ error: 'Could not reach AI provider' }), {
@@ -245,7 +308,7 @@ export default async function handler(req) {
       try {
         // gpt-oss-120b uses max_completion_tokens, not the (older) max_tokens Groq expects —
         // confirmed against Cerebras's live model catalog, see lib/groqHelpers.js's comment.
-        const cerebrasRes = await requestChatCompletion('https://api.cerebras.ai/v1/chat/completions', cerebrasKey, 'gpt-oss-120b', { max_completion_tokens: 320 });
+        const cerebrasRes = await requestChatCompletion('https://api.cerebras.ai/v1/chat/completions', cerebrasKey, 'gpt-oss-120b', { max_completion_tokens: maxTokens });
         if (cerebrasRes.ok) {
           finalRes = cerebrasRes;
           console.error('Cerebras fallback succeeded for chat — serving this response instead of Groq');

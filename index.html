@@ -4686,8 +4686,14 @@
   </div>
   <!-- Messages -->
   <div id="chat-messages" style="flex:1; overflow-y:auto; padding:1rem 1.25rem; display:flex; flex-direction:column; gap:0.75rem; min-height:200px; max-height:330px;"></div>
+  <!-- Draft actions: reuses the same Groq call as chat, but the output is always framed as a
+       draft the user reviews/edits, never APEX's own stance — see requestChatDraft(). -->
+  <div style="padding:0.5rem 1rem 0; border-top:1px solid var(--border); display:flex; gap:6px; flex-wrap:wrap; background:var(--surface);">
+    <button onclick="requestChatDraft('advisor_question')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Draft question for advisor</button>
+    <button onclick="requestChatDraft('research_note')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Draft research note</button>
+  </div>
   <!-- Input -->
-  <div style="padding:0.75rem 1rem; border-top:1px solid var(--border); display:flex; gap:8px; background:var(--surface);">
+  <div style="padding:0.75rem 1rem; display:flex; gap:8px; background:var(--surface);">
     <input id="chat-input" type="text" placeholder="Ask about this scan…" style="flex:1; background:var(--card); border:1px solid var(--border); border-radius:20px; padding:8px 14px; font-size:13px; color:var(--text); font-family:'IBM Plex Sans',sans-serif; outline:none;" onkeydown="if(event.key==='Enter') sendChatMessage()" />
     <button onclick="sendChatMessage()" style="background:var(--accent); color:var(--text); border:none; border-radius:50%; width:36px; height:36px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0;">↑</button>
   </div>
@@ -4885,6 +4891,85 @@
       typing.remove();
       addChatMessage('Something went wrong. Please try again.', 'ai');
     }
+  }
+
+  // "Draft a question, not an answer" — the same Groq call as regular chat (api/chat.js), just a
+  // different action/prompt path. Deliberately single-shot (no chat history sent, nothing added
+  // to chatHistory) since this isn't a conversation turn — it's a standalone drafted artifact the
+  // user reviews and edits, never APEX's own stance. Rendered as an editable textarea, not a chat
+  // bubble, to keep that "draft, not answer" distinction visible in the UI itself.
+  const CHAT_DRAFT_LABELS = {
+    advisor_question: 'Draft — question for your advisor',
+    research_note: 'Draft — research note (yours to edit)'
+  };
+
+  async function requestChatDraft(action) {
+    if (!chatScanData && chatMode !== 'portfolio') return;
+    const typing = addTypingIndicator();
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentUser) {
+        const { data: sessionData } = await sb.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ scanData: chatScanData, bizName: chatBizName, mode: chatMode, action })
+      });
+
+      const data = await res.json();
+      typing.remove();
+      const draftText = data.reply || 'Sorry, I couldn\'t generate a draft. Please try again.';
+      addChatDraftBlock(draftText, action);
+    } catch (e) {
+      typing.remove();
+      addChatMessage('Something went wrong generating the draft. Please try again.', 'ai');
+    }
+  }
+
+  function addChatDraftBlock(text, action) {
+    const messages = document.getElementById('chat-messages');
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'align-self:stretch; border:1px dashed var(--accent); border-radius:12px; padding:10px 12px; background:var(--surface); display:flex; flex-direction:column; gap:6px;';
+
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:10px; font-weight:700; letter-spacing:0.4px; color:var(--accent); text-transform:uppercase;';
+    label.textContent = CHAT_DRAFT_LABELS[action] || 'Draft';
+    wrap.appendChild(label);
+
+    // A <textarea> (not innerHTML) both keeps this trivially XSS-safe and makes the "this is
+    // editable, not final" framing real rather than just stated in copy.
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.rows = action === 'advisor_question' ? 3 : 6;
+    textarea.style.cssText = 'width:100%; resize:vertical; border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:13px; font-family:\'IBM Plex Sans\',sans-serif; color:var(--text); background:var(--card); outline:none; box-sizing:border-box;';
+    wrap.appendChild(textarea);
+
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:11px; color:var(--muted);';
+    hint.textContent = 'Edit freely — this is only a starting point, not something APEX sends or acts on for you.';
+    wrap.appendChild(hint);
+
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = 'display:flex; gap:8px; justify-content:flex-end;';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.textContent = 'Copy';
+    copyBtn.style.cssText = 'background:none; border:1px solid var(--border); border-radius:14px; padding:5px 12px; font-size:12px; color:var(--text); cursor:pointer;';
+    copyBtn.onclick = () => {
+      navigator.clipboard?.writeText(textarea.value).then(() => {
+        copyBtn.textContent = 'Copied';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+      }).catch(() => {});
+    };
+    actionsRow.appendChild(copyBtn);
+    wrap.appendChild(actionsRow);
+
+    messages.appendChild(wrap);
+    messages.scrollTop = messages.scrollHeight;
   }
 
   // ── PWA: service worker registration + install banner ──
