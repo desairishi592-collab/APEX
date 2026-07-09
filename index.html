@@ -1003,6 +1003,7 @@
     <div class="action-row no-print" style="margin-bottom: 1.25rem;">
       <button class="btn-outline" id="r-watchlist-btn" style="display:none;" onclick="saveToWatchlist()">☆ Save to Watchlist</button>
       <button class="btn-outline" id="export-pdf-btn" onclick="exportPdf()">⬇ Export PDF report</button>
+      <button class="btn-outline" id="export-csv-btn" onclick="exportScanCsv()">⬇ Export CSV</button>
     </div>
 
     <!-- PRO COMING SOON -->
@@ -1020,6 +1021,7 @@
     <div class="results-header">
       <h2>My Watchlist</h2>
       <div style="display:flex; gap:8px;">
+        <button class="rescan-btn" onclick="exportWatchlistCsv()">⬇ Export CSV</button>
         <button class="rescan-btn" onclick="openPortfolioChat()">Ask APEX</button>
         <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
       </div>
@@ -1049,6 +1051,7 @@
     <div class="results-header">
       <h2>Portfolio Health</h2>
       <div style="display:flex; gap:8px;">
+        <button class="rescan-btn" onclick="exportPortfolioCsv()">⬇ Export CSV</button>
         <button class="rescan-btn" onclick="openPortfolioChat()">Ask APEX</button>
         <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
       </div>
@@ -1906,12 +1909,17 @@
     loadWatchlistPage();
   }
 
+  // Populated at the end of loadWatchlistPage() below — read by exportWatchlistCsv() so the CSV
+  // export reflects exactly what's on screen without a second fetch.
+  let watchlistExportRows = [];
+
   // Renders the saved rows immediately (so the page isn't blank while prices load), then
   // fetches live quotes in one batched request and patches price/change into each row —
   // avoids a separate Finnhub round-trip per ticker from the client.
   async function loadWatchlistPage() {
     const listEl = document.getElementById('watchlist-page-list');
     listEl.innerHTML = '<div class="history-loading">Loading watchlist…</div>';
+    watchlistExportRows = [];
 
     if (!currentUser) {
       listEl.innerHTML = '<div class="history-empty">Log in to see your watchlist.</div>';
@@ -1920,9 +1928,12 @@
 
     let rows;
     try {
+      // score/safety_score/signal are already columns on this table (kept fresh by the daily
+      // APEX Agent cron, lib/scoreMonitor.js) — not currently rendered in the row UI below, but
+      // included here so the CSV export can include them without any new fetch.
       const { data, error } = await sb
         .from('watchlist')
-        .select('ticker, company_name, created_at')
+        .select('ticker, company_name, created_at, score, safety_score, signal')
         .eq('user_id', currentUser.id)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -1938,6 +1949,7 @@
     }
 
     listEl.innerHTML = rows.map(w => renderWatchlistRow(w, null)).join('');
+    watchlistExportRows = rows.map(w => ({ ...w, quote: null }));
 
     try {
       const tickers = [...new Set(rows.map(r => r.ticker))];
@@ -1945,10 +1957,30 @@
       const data = await res.json();
       if (res.ok && data.quotes) {
         listEl.innerHTML = rows.map(w => renderWatchlistRow(w, data.quotes[w.ticker] || null)).join('');
+        watchlistExportRows = rows.map(w => ({ ...w, quote: data.quotes[w.ticker] || null }));
       }
     } catch (e) {
       // Non-fatal: rows already rendered without live prices, just leave them as "—"
     }
+  }
+
+  function exportWatchlistCsv() {
+    if (!watchlistExportRows.length) return;
+    const rows = [['Ticker', 'Company Name', 'Price', 'Change', 'Change %', 'APEX Score', 'Safety Score', 'Signal']];
+    watchlistExportRows.forEach(w => {
+      const q = w.quote;
+      rows.push([
+        w.ticker,
+        w.company_name || w.ticker,
+        q && typeof q.price === 'number' ? q.price.toFixed(2) : '',
+        q && typeof q.change === 'number' ? q.change.toFixed(2) : '',
+        q && typeof q.percentChange === 'number' ? q.percentChange.toFixed(2) + '%' : '',
+        w.score ?? '',
+        w.safety_score ?? '',
+        w.signal || ''
+      ]);
+    });
+    downloadCsv(`apex-watchlist-${todayDateStamp()}.csv`, rows);
   }
 
   function renderWatchlistRow(w, quote) {
@@ -3266,13 +3298,15 @@
       });
       const data = await res.json();
       if (!res.ok || data.error) return null;
-      // sectorBenchmark.sector is already part of this same response (lib/sectorBenchmarks.js,
-      // computed for the industry-calibrated score above) — capturing it here for the Portfolio
-      // Health Score's diversification component costs nothing extra, no new Finnhub call.
+      // sectorBenchmark.sector and subScores are already part of this same response
+      // (lib/sectorBenchmarks.js / lib/subScores.js) — capturing them here (for the Portfolio
+      // Health Score's diversification component and the CSV export's sub-score columns,
+      // respectively) costs nothing extra, no new Finnhub/Groq call.
       const result = {
         score: data.score ?? null,
         redFlagCount: Array.isArray(data.redFlags) ? data.redFlags.length : 0,
-        sector: data.sectorBenchmark?.sector ?? null
+        sector: data.sectorBenchmark?.sector ?? null,
+        subScores: Array.isArray(data.subScores) ? data.subScores : []
       };
       setCachedApexScore(ticker, result);
       return result;
@@ -3385,11 +3419,16 @@
     loadPortfolioPage();
   }
 
+  // Populated at the end of loadPortfolioPage() below — read by exportPortfolioCsv() so the CSV
+  // export reflects exactly what's on screen without a second fetch.
+  let portfolioExportRows = [];
+
   async function loadPortfolioPage() {
     const listEl = document.getElementById('portfolio-holdings-list');
     const verdictEl = document.getElementById('portfolio-verdict-text');
     listEl.innerHTML = '<div class="history-loading">Loading portfolio…</div>';
     verdictEl.textContent = 'Loading…';
+    portfolioExportRows = [];
     document.getElementById('portfolio-agg-score').textContent = '—';
     document.getElementById('portfolio-health-explanation').textContent = 'Loading…';
     document.getElementById('portfolio-redflag-total').textContent = '—';
@@ -3429,7 +3468,7 @@
     let holdings = rows.map(r => ({
       id: r.id, ticker: r.ticker, companyName: r.company_name || r.ticker,
       shares: Number(r.shares), purchasePrice: Number(r.purchase_price),
-      currentPrice: null, apexScore: null, redFlagCount: null, sector: null
+      currentPrice: null, apexScore: null, redFlagCount: null, sector: null, subScores: []
     }));
     listEl.innerHTML = holdings.map(h => renderHoldingRow(h, false)).join('');
 
@@ -3443,6 +3482,7 @@
           h.apexScore = scoreData.score;
           h.redFlagCount = scoreData.redFlagCount;
           h.sector = scoreData.sector || null;
+          h.subScores = scoreData.subScores || [];
         }
       }))
     ]);
@@ -3455,6 +3495,8 @@
         currentPrice: q && typeof q.price === 'number' ? q.price : null
       };
     });
+
+    portfolioExportRows = holdings;
 
     const aggregate = computePortfolioAggregate(holdings);
     const { healthScore, avgScore, totalRedFlags, weakest } = aggregate;
@@ -3487,6 +3529,36 @@
     } else {
       verdictEl.textContent = 'Not enough data to generate a verdict yet.';
     }
+  }
+
+  const PORTFOLIO_CSV_SUB_CATEGORIES = ['Profitability', 'Financial Health', 'Valuation', 'Risk (Volatility)', 'Momentum'];
+
+  function exportPortfolioCsv() {
+    if (!portfolioExportRows.length) return;
+    const header = ['Ticker', 'Company Name', 'Shares', 'Cost Basis', 'Current Price', 'Gain/Loss $', 'Gain/Loss %', 'APEX Score', 'Red Flags', 'Sector', ...PORTFOLIO_CSV_SUB_CATEGORIES.map(c => c + ' (0-10)')];
+    const rows = [header];
+    portfolioExportRows.forEach(h => {
+      const gainLoss = h.currentPrice != null ? (h.currentPrice - h.purchasePrice) * h.shares : null;
+      const gainLossPct = h.currentPrice != null ? ((h.currentPrice - h.purchasePrice) / h.purchasePrice) * 100 : null;
+      const subScoreValues = PORTFOLIO_CSV_SUB_CATEGORIES.map(cat => {
+        const s = Array.isArray(h.subScores) ? h.subScores.find(x => x.category === cat) : null;
+        return s ? s.score : '';
+      });
+      rows.push([
+        h.ticker,
+        h.companyName,
+        h.shares,
+        h.purchasePrice.toFixed(2),
+        h.currentPrice != null ? h.currentPrice.toFixed(2) : '',
+        gainLoss != null ? gainLoss.toFixed(2) : '',
+        gainLossPct != null ? gainLossPct.toFixed(1) + '%' : '',
+        h.apexScore ?? '',
+        h.redFlagCount ?? '',
+        h.sector || '',
+        ...subScoreValues
+      ]);
+    });
+    downloadCsv(`apex-portfolio-${todayDateStamp()}.csv`, rows);
   }
 
   async function loadPortfolioVerdict(holdings, aggregateScore) {
@@ -4154,6 +4226,40 @@
     }
   }
 
+  // ── CSV EXPORT (shared helper) ──
+  // Purely client-side: serializes rows already held in memory into a CSV Blob and triggers a
+  // download — no new endpoint, no backend involvement. Used by the scan report, watchlist, and
+  // portfolio export buttons below.
+  function csvEscapeCell(value) {
+    const s = value == null ? '' : String(value);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  // `rows` is an array of arrays — each inner array is one CSV row/line. Blank inner arrays
+  // render as blank lines, useful for separating a metadata block from a data table in one file.
+  function downloadCsv(filename, rows) {
+    const csv = rows.map(row => row.map(csvEscapeCell).join(',')).join('\r\n');
+    // Leading BOM so Excel (which otherwise guesses the wrong encoding for non-ASCII characters
+    // like the — em dash already used throughout this app's copy) opens it as UTF-8 correctly.
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function csvSafeFilenamePart(s) {
+    return (s || 'apex').toString().trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'apex';
+  }
+
+  function todayDateStamp() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
   // ── PDF EXPORT ── (free during beta, per the "PDF exports... free during our beta" banner above)
   async function exportPdf() {
     const target = document.getElementById('s-results');
@@ -4185,6 +4291,53 @@
       btn.disabled = false;
       btn.textContent = originalText;
     }
+  }
+
+  // ── SCAN REPORT CSV EXPORT ──
+  function exportScanCsv() {
+    if (!scanData) return;
+    const d = scanData;
+    const rows = [];
+
+    rows.push(['Company', currentScanBizName || currentStockTicker || 'Unknown']);
+    if (d.isPublicStock && currentStockTicker) rows.push(['Ticker', currentStockTicker]);
+    rows.push(['Mode', scanMode === 'investor' ? 'Investor' : 'Owner']);
+    rows.push(['Score', `${d.score}/100`]);
+    rows.push(['Status', d.status || '']);
+    rows.push(['Summary', d.summary || '']);
+    rows.push(['Date', todayDateStamp()]);
+
+    if (Array.isArray(d.metrics) && d.metrics.length) {
+      rows.push([]);
+      rows.push(['Metrics']);
+      rows.push(['Label', 'Value', 'Trend']);
+      d.metrics.forEach(m => rows.push([m.label, m.value, m.trend]));
+    }
+
+    // STOCK ONLY: explainable sub-score breakdown — the "sub-score breakdown" the task calls out
+    if (d.isPublicStock && Array.isArray(d.subScores) && d.subScores.length) {
+      rows.push([]);
+      rows.push(['Sub-Score Breakdown']);
+      rows.push(['Category', 'Score (0-10)', 'Weight', 'Reason']);
+      d.subScores.forEach(s => rows.push([s.category, s.score, s.weightLabel || '', s.reason || '']));
+    }
+
+    if (Array.isArray(d.costCuts) && d.costCuts.length) {
+      rows.push([]);
+      rows.push([scanMode === 'investor' ? 'Key Risks' : 'Cost Cuts']);
+      rows.push(['Title', 'Description', 'Severity']);
+      d.costCuts.forEach(c => rows.push([c.title, c.desc, c.color === 'red' ? 'High' : c.color === 'amb' ? 'Medium' : 'Low']));
+    }
+
+    if (d.isPublicStock && Array.isArray(d.redFlags) && d.redFlags.length) {
+      rows.push([]);
+      rows.push(['Red Flags']);
+      rows.push(['Name', 'Severity', 'Explanation']);
+      d.redFlags.forEach(f => rows.push([f.name, f.severity, f.explanation]));
+    }
+
+    const namePart = csvSafeFilenamePart(currentStockTicker || currentScanBizName);
+    downloadCsv(`${namePart}-apex-report-${todayDateStamp()}.csv`, rows);
   }
 
   function drawRing(canvasId, score, greenMin, amberMin) {
