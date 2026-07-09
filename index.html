@@ -2340,8 +2340,19 @@
   }
 
   // ── PRO: SCORE TREND ──
-  // Shows past scores for the same business name, so Pro users can see if they're improving.
-  async function loadScoreTrend(bizName) {
+  // Shows past scores for the same business/ticker, so Pro users can see if they're improving.
+  //
+  // Root-caused: this used to match ONLY by business_name (`.eq('business_name', bizName)`) for
+  // every mode, including stock scans. For a stock scan, business_name is set to
+  // `companyName || ticker` at save time (see saveScanAndIncrement call sites) — an INCONSISTENT
+  // key across scans of the same ticker, since it stores whatever company name happened to be
+  // typed that particular time ("AAPL" one scan, "Apple Inc." another). That let this list mix
+  // together an incomplete/non-contiguous slice of a ticker's real history as if it were one
+  // continuous timeline — which is what produced deltas that didn't match the row-to-row scores:
+  // the underlying array itself wasn't a clean single chronology, even though the delta math
+  // applied to it was correct. Same root-cause class already fixed for the trend CHART above via
+  // full_data.ticker; this older list never got that same fix until now.
+  async function loadScoreTrend(bizName, ticker) {
     const trendCard = document.getElementById('r-trend-card');
     const trendRows = document.getElementById('r-trend-rows');
     if (!trendCard || !trendRows) return;
@@ -2352,15 +2363,43 @@
     }
 
     try {
-      const { data, error } = await sb
-        .from('scans')
-        .select('score, created_at')
-        .eq('user_id', currentUser.id)
-        .eq('business_name', bizName)
-        .order('created_at', { ascending: false })
-        .limit(6);
-
-      if (error) throw error;
+      let data;
+      if (ticker) {
+        // STOCK scans: match by the reliable ticker embedded in full_data (falls back to
+        // business_name only for legacy rows saved before that field existed), same logic
+        // loadStockScoreTrend above already uses — reused here rather than re-derived.
+        const upperTicker = ticker.toUpperCase();
+        const { data: rows, error } = await sb
+          .from('scans')
+          .select('score, created_at, business_name, full_data')
+          .eq('user_id', currentUser.id)
+          .eq('mode', 'investor')
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(SCORE_TREND_QUERY_LIMIT);
+        if (error) throw error;
+        data = (rows || [])
+          .filter(row => {
+            const fd = row.full_data;
+            if (!fd || !fd.isPublicStock || typeof row.score !== 'number') return false;
+            if (fd.ticker) return fd.ticker === upperTicker;
+            return (row.business_name || '').trim().toUpperCase() === upperTicker;
+          })
+          .slice(0, 6);
+      } else {
+        // OWNER-mode business scans: no ticker concept applies, business_name is still the
+        // only identity key available — unchanged, except for the id tiebreaker below.
+        const { data: rows, error } = await sb
+          .from('scans')
+          .select('score, created_at')
+          .eq('user_id', currentUser.id)
+          .eq('business_name', bizName)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(6);
+        if (error) throw error;
+        data = rows;
+      }
 
       // Need at least 2 past scans of the same business to show a meaningful trend
       if (!data || data.length < 2) {
@@ -4024,7 +4063,7 @@
     }
 
     // PRO: score trend over time for this business (only shown if there's history)
-    loadScoreTrend(currentScanBizName);
+    loadScoreTrend(currentScanBizName, d.isPublicStock ? currentStockTicker : null);
 
     // BETA: everything fully unlocked — no paywall. Restore lock overlay logic for Pro launch.
 
