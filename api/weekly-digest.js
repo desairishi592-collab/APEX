@@ -191,43 +191,14 @@ function buildSectorComparison(tickerRows, sectorByTicker) {
   return sectors.length >= 2 ? sectors.sort((a, b) => b.avgScore - a.avgScore) : [];
 }
 
-function scoreTrendSection(trend) {
-  if (!trend) return '';
-  const arrow = trend.delta > 0 ? '▲' : trend.delta < 0 ? '▼' : '—';
-  const color = trend.delta > 0 ? '#1a9e5c' : trend.delta < 0 ? '#c0392b' : '#666';
-  return `
-    <h3 style="margin:24px 0 8px;font-size:16px;">Business health score trend</h3>
-    <p style="margin:0 0 4px;">
-      <strong>${escapeHtml(trend.businessName)}</strong>: ${trend.previousScore} → ${trend.latestScore}
-      <span style="color:${color};font-weight:bold;">${arrow} ${Math.abs(trend.delta)}</span>
-    </p>`;
-}
-
-function signalChangesSection(changes) {
-  if (!changes.length) return '';
-  const rows = changes.map(c =>
-    `<li><strong>${escapeHtml(c.companyName || c.ticker)} (${escapeHtml(c.ticker)})</strong>: ${escapeHtml(c.oldSignal)} → <strong>${escapeHtml(c.newSignal)}</strong></li>`
-  ).join('');
-  return `
-    <h3 style="margin:24px 0 8px;font-size:16px;">Watchlist signal changes</h3>
-    <ul style="margin:0;padding-left:20px;">${rows}</ul>`;
-}
-
-function triggeredAlertsSection(alerts) {
-  if (!alerts.length) return '';
-  const rows = alerts.map(a =>
-    `<li><strong>${escapeHtml(a.company_name || a.ticker)} (${escapeHtml(a.ticker)})</strong> hit your target of $${a.target_price}</li>`
-  ).join('');
-  return `
-    <h3 style="margin:24px 0 8px;font-size:16px;">Triggered price alerts this week</h3>
-    <ul style="margin:0;padding-left:20px;">${rows}</ul>`;
-}
-
+// The digest's entire email content: one synthesized narrative (lib/portfolioDigest.js), not the
+// bullet-point sections this used to be (one per data source, each restating raw numbers). The
+// underlying data those old sections showed — score trend, signal changes, triggered alerts,
+// movers, red flags, earnings, sector comparison — all still feeds the narrative below; only the
+// presentation collapsed from N stitched sections into one connected analyst-style paragraph.
 function digestNarrativeSection(narrative) {
   if (!narrative) return '';
-  return `
-    <h3 style="margin:24px 0 8px;font-size:16px;">Your weekly portfolio digest</h3>
-    <p style="margin:0;">${escapeHtml(narrative)}</p>`;
+  return `<p style="margin:0;font-size:15px;line-height:1.6;">${escapeHtml(narrative)}</p>`;
 }
 
 async function sendDigestEmail(resendKey, email, sections) {
@@ -249,12 +220,12 @@ async function sendDigestEmail(resendKey, email, sections) {
 
 // Runs every Monday at 9am (see vercel.json crons) — the same slot this cron already had; no new
 // cron slot added (Vercel Hobby caps this project at 2, both already spoken for by this file and
-// api/check-market-alerts.js). For every registered user, builds a personalized digest from four
-// independent sources — owner-mode scan trend, watchlist signal drift, price alerts triggered in
-// the past week, and (new) an unprompted portfolio digest narrative (score movers, red flags/
-// insider activity, upcoming earnings, a sector comparison) — and emails it only if there's
-// actually something to report. The portfolio digest additionally always gets an in-app
-// notification regardless of email, unlike the other three sections.
+// api/check-market-alerts.js). For every registered user, aggregates four independent sources —
+// owner-mode scan trend, watchlist signal drift, price alerts triggered in the past week, and
+// score movers/red-flags/insider activity/upcoming earnings/a sector comparison — exactly as
+// before, then synthesizes ALL of it into ONE short analyst-style narrative (lib/portfolioDigest.js)
+// instead of separate bullet-point sections. Delivered in-app unconditionally when there's
+// anything to report; email is the nice-to-have layered on top if Resend is configured.
 export default async function handler(req) {
   // Fail CLOSED (require CRON_SECRET to be configured) rather than silently allowing public
   // access if the env var is ever missing/misconfigured.
@@ -348,14 +319,15 @@ export default async function handler(req) {
       // Non-fatal: skip the triggered-alerts section for this user this week
     }
 
-    // ── 4. Weekly portfolio digest: score movers (from score_history), new red flags/insider
-    // activity, upcoming earnings, and a proactive sector-level comparison. Unlike sections 1-3
-    // above (unchanged), this doesn't re-scan anything — it reads data already computed
-    // elsewhere (score_history snapshots, existing red_flag notifications, sector-benchmark
-    // resolution), plus two lightweight non-AI Finnhub calls (profile2, calendar/earnings).
-    // Delivered in-app unconditionally (below) — email inclusion (further below) is the
-    // nice-to-have layered on top, using the Resend setup this file already has.
-    let digestNarrative = null;
+    // ── 4. Score movers (from score_history), new red flags/insider activity, upcoming
+    // earnings, and a proactive sector-level comparison. This doesn't re-scan anything — it
+    // reads data already computed elsewhere (score_history snapshots, existing red_flag
+    // notifications, sector-benchmark resolution), plus two lightweight non-AI Finnhub calls
+    // (profile2, calendar/earnings). Aggregation logic is unchanged from before; only the
+    // variables are now hoisted out to the loop scope so section 5 below can fold them into the
+    // SAME narrative as sections 1-3, instead of section 4 getting its own separate narrative
+    // while 1-3 stayed raw bullet HTML.
+    let movers = [], redFlagEvents = [], earnings = [], sectorComparison = [];
     try {
       const [watchlistForDigest, portfolioForDigest] = await Promise.all([
         supabaseSelect(serviceRoleKey, `watchlist?select=ticker,company_name,score&user_id=eq.${user.id}`),
@@ -372,53 +344,56 @@ export default async function handler(req) {
           supabaseSelect(serviceRoleKey, `notifications?select=ticker,company_name,title,body&user_id=eq.${user.id}&type=eq.red_flag&created_at=gte.${sevenDaysAgo}`).catch(() => [])
         ]);
 
-        const movers = tickerRows
+        movers = tickerRows
           .map(r => deltas[r.ticker] ? { ticker: r.ticker, companyName: r.company_name, ...deltas[r.ticker] } : null)
           .filter(m => m && Math.abs(m.delta) >= MOVER_THRESHOLD)
           .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
           .slice(0, TOP_MOVERS_PER_USER);
 
-        const earnings = tickerRows
+        earnings = tickerRows
           .filter(r => earningsByTicker[r.ticker])
           .map(r => ({ ticker: r.ticker, companyName: r.company_name, date: earningsByTicker[r.ticker] }));
 
-        const sectorComparison = buildSectorComparison(tickerRows, sectorByTicker);
-
-        const digestCtx = { movers, redFlagEvents: redFlagNotifs, earnings, sectorComparison };
-        if (hasDigestContent(digestCtx)) {
-          digestNarrative = await generateDigestNarrative(digestCtx);
-          // In-app delivery — the "at minimum" requirement, independent of whether email sends
-          // below (unlike sections 1-3, which today only ever go out via email).
-          const created = await createNotification(serviceRoleKey, {
-            userId: user.id,
-            type: 'weekly_digest',
-            ticker: 'PORTFOLIO', // sentinel: this alert spans multiple holdings, not one ticker —
-                                  // every other notification type always has a real ticker, and
-                                  // the column's nullability isn't known from this environment,
-                                  // so a non-null placeholder is the safer default
-            companyName: null,
-            title: 'Your weekly portfolio digest',
-            body: digestNarrative
-          });
-          if (created) digestsCreated++;
-        }
+        sectorComparison = buildSectorComparison(tickerRows, sectorByTicker);
+        redFlagEvents = redFlagNotifs;
       }
     } catch (e) {
-      console.error('Portfolio digest failed for user', user.id, e.message);
+      console.error('Portfolio digest data aggregation failed for user', user.id, e.message);
     }
 
-    if (!scoreTrend && !signalChanges.length && !triggeredAlerts.length && !digestNarrative) continue;
+    // ── 5. Narrative synthesis: ONE Groq call (lib/portfolioDigest.js, same Groq→Cerebras
+    // fallback as the rest of APEX Agent) weaves ALL of the above — score trend, signal changes,
+    // triggered alerts, movers, red flags, earnings, sector comparison — into a short, connected
+    // "week in review," replacing what used to be three separate raw bullet sections plus one
+    // narrower narrative covering only section 4. Delivered in-app unconditionally (below) —
+    // email inclusion (further below) is the nice-to-have layered on top.
+    let digestNarrative = null;
+    try {
+      const digestCtx = { scoreTrend, signalChanges, triggeredAlerts, movers, redFlagEvents, earnings, sectorComparison };
+      if (hasDigestContent(digestCtx)) {
+        digestNarrative = await generateDigestNarrative(digestCtx);
+        const created = await createNotification(serviceRoleKey, {
+          userId: user.id,
+          type: 'weekly_digest',
+          ticker: 'PORTFOLIO', // sentinel: this alert spans multiple holdings, not one ticker —
+                                // every other notification type always has a real ticker, and
+                                // the column's nullability isn't known from this environment,
+                                // so a non-null placeholder is the safer default
+          companyName: null,
+          title: 'Your weekly portfolio digest',
+          body: digestNarrative
+        });
+        if (created) digestsCreated++;
+      }
+    } catch (e) {
+      console.error('Digest narrative generation failed for user', user.id, e.message);
+    }
+
+    if (!digestNarrative) continue;
     if (!resendKey) continue;
 
-    const sections = [
-      scoreTrendSection(scoreTrend),
-      signalChangesSection(signalChanges),
-      triggeredAlertsSection(triggeredAlerts),
-      digestNarrativeSection(digestNarrative)
-    ];
-
     try {
-      const sent = await sendDigestEmail(resendKey, user.email, sections);
+      const sent = await sendDigestEmail(resendKey, user.email, [digestNarrativeSection(digestNarrative)]);
       if (sent) emailsSent++;
     } catch {
       // Non-fatal: this user just misses this week's digest
