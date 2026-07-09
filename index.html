@@ -4155,8 +4155,42 @@
     });
   }
 
-  const PWA_DISMISS_KEY = 'pwaInstallDismissed';
+  // Stores a "suppress until" timestamp (ms since epoch), not a plain dismissed flag — so a
+  // decline is remembered for a while, not forever, in case the user wants to install later.
+  // An explicit "X"/dismiss is a stronger signal than the banner simply timing out unnoticed,
+  // so it's remembered for longer than an auto-hide.
+  const PWA_DISMISS_KEY = 'pwaInstallSuppressUntil';
+  const PWA_EXPLICIT_DISMISS_DAYS = 30;
+  const PWA_AUTO_DISMISS_DAYS = 3;
+  const PWA_AUTO_DISMISS_MS = 8000; // how long the banner stays on screen before hiding itself
   let deferredInstallPrompt = null;
+  let pwaBannerAutoHideTimer = null;
+
+  function isPwaPromptSuppressed() {
+    return Date.now() < Number(localStorage.getItem(PWA_DISMISS_KEY) || 0);
+  }
+
+  function suppressPwaPromptFor(days) {
+    try { localStorage.setItem(PWA_DISMISS_KEY, String(Date.now() + days * 24 * 60 * 60 * 1000)); } catch {}
+  }
+
+  // Shared show/hide so every path (native prompt banner, iOS instructional banner, explicit
+  // dismiss, native install flow) manages the same auto-hide timer consistently rather than
+  // each call site remembering to clear it.
+  function showPwaInstallBanner() {
+    document.getElementById('pwa-install-banner').classList.add('active');
+    clearTimeout(pwaBannerAutoHideTimer);
+    pwaBannerAutoHideTimer = setTimeout(() => {
+      document.getElementById('pwa-install-banner').classList.remove('active');
+      // Timed out with no interaction — treat it as "not interested right now", not a hard no.
+      suppressPwaPromptFor(PWA_AUTO_DISMISS_DAYS);
+    }, PWA_AUTO_DISMISS_MS);
+  }
+
+  function hidePwaInstallBanner() {
+    clearTimeout(pwaBannerAutoHideTimer);
+    document.getElementById('pwa-install-banner').classList.remove('active');
+  }
 
   // Fires once Chrome/Edge determine the manifest+SW+HTTPS installability criteria are
   // met — this IS "the browser detects it's installable". We can't legally skip straight
@@ -4165,31 +4199,30 @@
   // clicking "Install" below is what triggers the real native prompt.
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
-    if (localStorage.getItem(PWA_DISMISS_KEY)) return;
+    if (isPwaPromptSuppressed()) return;
     deferredInstallPrompt = e;
-    document.getElementById('pwa-install-banner').classList.add('active');
+    showPwaInstallBanner();
   });
 
   window.addEventListener('appinstalled', () => {
-    document.getElementById('pwa-install-banner').classList.remove('active');
+    hidePwaInstallBanner();
     deferredInstallPrompt = null;
   });
 
   async function triggerPwaInstall() {
-    const banner = document.getElementById('pwa-install-banner');
     if (!deferredInstallPrompt) {
-      banner.classList.remove('active');
+      hidePwaInstallBanner();
       return;
     }
+    hidePwaInstallBanner(); // the user is actively interacting — stop the auto-hide countdown now
     deferredInstallPrompt.prompt();
     await deferredInstallPrompt.userChoice;
     deferredInstallPrompt = null;
-    banner.classList.remove('active');
   }
 
   function dismissPwaInstallBanner() {
-    document.getElementById('pwa-install-banner').classList.remove('active');
-    try { localStorage.setItem(PWA_DISMISS_KEY, '1'); } catch {}
+    hidePwaInstallBanner();
+    suppressPwaPromptFor(PWA_EXPLICIT_DISMISS_DAYS);
   }
 
   // iOS Safari never fires beforeinstallprompt (no equivalent API exists there) — show a
@@ -4199,11 +4232,11 @@
   window.addEventListener('load', function maybeShowIosInstallBanner() {
     const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
-    if (!isIos || isStandalone || localStorage.getItem(PWA_DISMISS_KEY)) return;
+    if (!isIos || isStandalone || isPwaPromptSuppressed()) return;
     document.getElementById('pwa-install-title').textContent = 'Install APEX on iOS';
     document.getElementById('pwa-install-sub').textContent = 'Tap the Share icon, then "Add to Home Screen".';
     document.getElementById('pwa-install-actions').innerHTML = '<button class="pib-dismiss" onclick="dismissPwaInstallBanner()" title="Dismiss">✕</button>';
-    document.getElementById('pwa-install-banner').classList.add('active');
+    showPwaInstallBanner();
   });
 </script>
 <div class="notif-toast-stack" id="notif-toast-stack"></div>
