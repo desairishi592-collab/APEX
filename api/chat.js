@@ -203,24 +203,32 @@ export default async function handler(req) {
     .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
     .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }));
 
-  let groqRes;
-  try {
-    groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  // FALLBACK PROVIDER: same rate-limit-only fallback as lib/groqHelpers.js's callGroqForJson —
+  // see that file's module comment for the full rationale and how the Cerebras model was chosen.
+  // Chat isn't JSON-mode (free-form reply text), so this call is built inline rather than sharing
+  // that helper, but the same two providers/models and the same "only on 429" rule apply.
+  async function requestChatCompletion(url, key, model, extraBody) {
+    return fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${key}`
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           ...recentMessages
         ],
         temperature: 0.5,
-        max_tokens: 320
+        ...extraBody
       })
     });
+  }
+
+  let groqRes;
+  try {
+    groqRes = await requestChatCompletion('https://api.groq.com/openai/v1/chat/completions', apiKey, 'llama-3.3-70b-versatile', { max_tokens: 320 });
   } catch (e) {
     console.error('Groq fetch failed:', e.message);
     return new Response(JSON.stringify({ error: 'Could not reach AI provider' }), {
@@ -228,15 +236,38 @@ export default async function handler(req) {
     });
   }
 
-  if (!groqRes.ok) {
-    const errText = await groqRes.text().catch(() => '');
-    console.error('Groq API error:', groqRes.status, errText);
+  let finalRes = groqRes;
+
+  if (groqRes.status === 429) {
+    const cerebrasKey = process.env.CEREBRAS_API_KEY;
+    if (cerebrasKey) {
+      console.error('Groq rate-limited (429) on chat — attempting Cerebras fallback');
+      try {
+        // gpt-oss-120b uses max_completion_tokens, not the (older) max_tokens Groq expects —
+        // confirmed against Cerebras's live model catalog, see lib/groqHelpers.js's comment.
+        const cerebrasRes = await requestChatCompletion('https://api.cerebras.ai/v1/chat/completions', cerebrasKey, 'gpt-oss-120b', { max_completion_tokens: 320 });
+        if (cerebrasRes.ok) {
+          finalRes = cerebrasRes;
+          console.error('Cerebras fallback succeeded for chat — serving this response instead of Groq');
+        } else {
+          const errText = await cerebrasRes.text().catch(() => '');
+          console.error('Cerebras fallback request failed for chat:', cerebrasRes.status, errText);
+        }
+      } catch (e) {
+        console.error('Cerebras fallback request threw for chat:', e.message);
+      }
+    }
+  }
+
+  if (!finalRes.ok) {
+    const errText = await finalRes.text().catch(() => '');
+    console.error('AI chat API error:', finalRes.status, errText);
     return new Response(JSON.stringify({ error: 'AI chat failed' }), {
       status: 502, headers: { 'Content-Type': 'application/json' }
     });
   }
 
-  const data = await groqRes.json();
+  const data = await finalRes.json();
   const reply = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.';
 
   return new Response(JSON.stringify({ reply }), {
