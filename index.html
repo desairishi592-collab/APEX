@@ -4122,6 +4122,13 @@
         } else {
           redFlagsRows.innerHTML = d.redFlags.map(f => {
             const severity = ['high', 'medium', 'low'].includes(f.severity) ? f.severity : 'medium';
+            // "What to check next" — a static, hand-written action per flag id (lib/redFlagActions.js,
+            // attached server-side by lib/redFlags.js's computeRedFlags()). Reuses the same
+            // .red-flag-explanation styling as the explanation line above it, no new CSS — just a
+            // bold label to tell the two apart. Omitted entirely for a flag id with no lookup entry.
+            const actionHtml = f.action
+              ? `<div class="red-flag-explanation"><strong>What to check:</strong> ${escapeHtml(f.action)}</div>`
+              : '';
             return `
               <div class="red-flag-row">
                 <div class="red-flag-head">
@@ -4130,6 +4137,7 @@
                 </div>
                 <div class="red-flag-explanation">${escapeHtml(f.explanation || '')}</div>
                 <div class="red-flag-value">${escapeHtml(f.value || '')}</div>
+                ${actionHtml}
               </div>`;
           }).join('');
         }
