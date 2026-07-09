@@ -1038,8 +1038,8 @@
             </div>
           </div>
           <div class="score-detail">
-            <h3>Aggregate health</h3>
-            <p style="font-size:12px; color:var(--muted);">Weighted by current position size</p>
+            <h3>Portfolio Health Score</h3>
+            <p style="font-size:12px; color:var(--muted);" id="portfolio-health-explanation">Loading…</p>
           </div>
         </div>
       </div>
@@ -3123,7 +3123,14 @@
       });
       const data = await res.json();
       if (!res.ok || data.error) return null;
-      const result = { score: data.score ?? null, redFlagCount: Array.isArray(data.redFlags) ? data.redFlags.length : 0 };
+      // sectorBenchmark.sector is already part of this same response (lib/sectorBenchmarks.js,
+      // computed for the industry-calibrated score above) — capturing it here for the Portfolio
+      // Health Score's diversification component costs nothing extra, no new Finnhub call.
+      const result = {
+        score: data.score ?? null,
+        redFlagCount: Array.isArray(data.redFlags) ? data.redFlags.length : 0,
+        sector: data.sectorBenchmark?.sector ?? null
+      };
       setCachedApexScore(ticker, result);
       return result;
     } catch {
@@ -3131,10 +3138,27 @@
     }
   }
 
-  // Weighted by CURRENT market value (shares * currentPrice), not cost basis — portfolio
-  // health is a present-tense question about what's actually held today. Falls back to
-  // purchase price for a single holding's weight only if its quote failed, rather than
-  // silently excluding it (which would understate real exposure).
+  // Portfolio Health Score — a single 0-100 composite, not just the plain weighted-average score
+  // (that's still computed below as `avgScore`, unchanged, and still fed to the existing AI
+  // verdict below exactly as before). Combines three components, each independently droppable
+  // when its data isn't available (same "drop the weight, renormalize the rest" principle
+  // lib/subScores.js's computeOverallScore already uses server-side for individual sub-scores):
+  //
+  //   1. avgScore            — position-weighted average holding score (existing logic, unchanged)
+  //   2. diversificationScore — 100 * (1 - largest single-sector share), using sector data already
+  //                             returned by the SAME live /api/analyze call made for the score
+  //                             above (sectorBenchmark.sector) — no new Finnhub call
+  //   3. redFlagDensityScore  — 100 * (1 - proportion of holdings carrying an active red flag),
+  //                             using the redFlagCount already returned by that same call
+  //
+  // Weighted by CURRENT market value (shares * currentPrice), not cost basis, for the avgScore
+  // component — portfolio health is a present-tense question about what's actually held today.
+  // Falls back to purchase price for a single holding's weight only if its quote failed, rather
+  // than silently excluding it (which would understate real exposure).
+  const PORTFOLIO_HEALTH_WEIGHTS = { avgScore: 0.5, diversification: 0.25, redFlagDensity: 0.25 };
+  const MIN_SECTORS_FOR_DIVERSIFICATION = 2; // a single resolved sector isn't a meaningful
+                                              // "concentration" claim — skip rather than overstate
+
   function computePortfolioAggregate(rows) {
     let weightedSum = 0, totalWeight = 0, totalRedFlags = 0, weakest = null;
     for (const r of rows) {
@@ -3146,8 +3170,71 @@
       totalRedFlags += r.redFlagCount || 0;
       if (!weakest || r.apexScore < weakest.apexScore) weakest = r;
     }
-    const aggregateScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null;
-    return { aggregateScore, totalRedFlags, weakest };
+    const avgScore = totalWeight > 0 ? weightedSum / totalWeight : null;
+
+    // Sector diversification: largest single-sector share among holdings with a resolved sector.
+    const sectorRows = rows.filter(r => r.sector);
+    let diversificationScore = null, dominantSector = null, dominantSectorShare = null;
+    if (sectorRows.length >= MIN_SECTORS_FOR_DIVERSIFICATION) {
+      const counts = {};
+      for (const r of sectorRows) counts[r.sector] = (counts[r.sector] || 0) + 1;
+      const [topSector, topCount] = Object.entries(counts).reduce((a, b) => (b[1] > a[1] ? b : a));
+      dominantSector = topSector;
+      dominantSectorShare = topCount / sectorRows.length;
+      diversificationScore = Math.round(100 * (1 - dominantSectorShare));
+    }
+
+    // Red-flag density: proportion of holdings (with a known red-flag count) carrying at least one.
+    const flagRows = rows.filter(r => typeof r.redFlagCount === 'number');
+    let redFlagDensityScore = null, flaggedCount = 0;
+    if (flagRows.length) {
+      flaggedCount = flagRows.filter(r => r.redFlagCount > 0).length;
+      redFlagDensityScore = Math.round(100 * (1 - flaggedCount / flagRows.length));
+    }
+
+    const components = [
+      { score: avgScore, weight: PORTFOLIO_HEALTH_WEIGHTS.avgScore },
+      { score: diversificationScore, weight: PORTFOLIO_HEALTH_WEIGHTS.diversification },
+      { score: redFlagDensityScore, weight: PORTFOLIO_HEALTH_WEIGHTS.redFlagDensity }
+    ].filter(c => c.score != null);
+    const totalCompWeight = components.reduce((s, c) => s + c.weight, 0);
+    const healthScore = components.length
+      ? Math.round(components.reduce((s, c) => s + c.score * c.weight, 0) / totalCompWeight)
+      : null;
+
+    return {
+      healthScore,
+      avgScore: avgScore != null ? Math.round(avgScore) : null,
+      diversificationScore, dominantSector, dominantSectorShare,
+      redFlagDensityScore, flaggedCount, flagRowsCount: flagRows.length,
+      totalRedFlags, weakest
+    };
+  }
+
+  // Deterministic (not AI-generated) one-line explanation of what's driving the Portfolio Health
+  // Score — same spirit as the per-stock sub-score reasons (lib/subScores.js), which cite the
+  // real number rather than a vague qualitative claim.
+  function explainPortfolioHealthScore(result) {
+    const { avgScore, diversificationScore, dominantSector, dominantSectorShare, redFlagDensityScore, flaggedCount, flagRowsCount } = result;
+    if (avgScore == null) return 'Not enough data yet to explain this score.';
+
+    const avgTag = avgScore >= 70 ? 'Strong' : avgScore >= 45 ? 'Moderate' : 'Weak';
+    const lead = `${avgTag} average holding health (${avgScore}/100)`;
+
+    const drags = [];
+    if (diversificationScore != null && diversificationScore < 60 && dominantSector) {
+      drags.push(`${Math.round(dominantSectorShare * 100)}% concentration in ${dominantSector} is a drag`);
+    }
+    if (redFlagDensityScore != null && flaggedCount > 0) {
+      drags.push(`${flaggedCount} of ${flagRowsCount} holding${flagRowsCount === 1 ? '' : 's'} carrying an active red flag`);
+    }
+
+    if (!drags.length) {
+      return diversificationScore != null
+        ? `${lead}, with good diversification and no active red flags dragging down the score.`
+        : `${lead}. Scan more of your holdings to add sector diversification to this score.`;
+    }
+    return `${lead}, but ${drags.join(' and ')}.`;
   }
 
   function openPortfolioPage() {
@@ -3161,12 +3248,14 @@
     listEl.innerHTML = '<div class="history-loading">Loading portfolio…</div>';
     verdictEl.textContent = 'Loading…';
     document.getElementById('portfolio-agg-score').textContent = '—';
+    document.getElementById('portfolio-health-explanation').textContent = 'Loading…';
     document.getElementById('portfolio-redflag-total').textContent = '—';
     document.getElementById('portfolio-redflag-breakdown').innerHTML = '';
 
     if (!currentUser) {
       listEl.innerHTML = '<div class="history-empty">Log in to see your portfolio.</div>';
       verdictEl.textContent = '';
+      document.getElementById('portfolio-health-explanation').textContent = '';
       return;
     }
 
@@ -3182,20 +3271,22 @@
     } catch (e) {
       listEl.innerHTML = '<div class="history-empty">Couldn\'t load your portfolio. Please try again.</div>';
       verdictEl.textContent = '';
+      document.getElementById('portfolio-health-explanation').textContent = '';
       return;
     }
 
     if (!rows.length) {
       listEl.innerHTML = '<div class="history-empty">No holdings yet — add one below to start tracking your portfolio\'s health.</div>';
       verdictEl.textContent = 'Add a holding to see your portfolio verdict.';
+      document.getElementById('portfolio-health-explanation').textContent = '';
       return;
     }
 
-    // Enriched holdings, starting with just the DB-stored fields — price/score patched in below.
+    // Enriched holdings, starting with just the DB-stored fields — price/score/sector patched in below.
     let holdings = rows.map(r => ({
       id: r.id, ticker: r.ticker, companyName: r.company_name || r.ticker,
       shares: Number(r.shares), purchasePrice: Number(r.purchase_price),
-      currentPrice: null, apexScore: null, redFlagCount: null
+      currentPrice: null, apexScore: null, redFlagCount: null, sector: null
     }));
     listEl.innerHTML = holdings.map(h => renderHoldingRow(h, false)).join('');
 
@@ -3208,6 +3299,7 @@
         if (scoreData) {
           h.apexScore = scoreData.score;
           h.redFlagCount = scoreData.redFlagCount;
+          h.sector = scoreData.sector || null;
         }
       }))
     ]);
@@ -3221,23 +3313,34 @@
       };
     });
 
-    const { aggregateScore, totalRedFlags, weakest } = computePortfolioAggregate(holdings);
+    const aggregate = computePortfolioAggregate(holdings);
+    const { healthScore, avgScore, totalRedFlags, weakest } = aggregate;
 
     listEl.innerHTML = holdings.map(h => renderHoldingRow(h, weakest && h.id === weakest.id)).join('');
 
-    if (aggregateScore != null) {
-      document.getElementById('portfolio-agg-score').textContent = aggregateScore;
-      drawRing('portfolio-score-canvas', aggregateScore, 70, 45);
+    // Portfolio Health Score — the new composite headline number (avg score + diversification +
+    // red-flag density; see computePortfolioAggregate above), not just the plain weighted average.
+    if (healthScore != null) {
+      document.getElementById('portfolio-agg-score').textContent = healthScore;
+      drawRing('portfolio-score-canvas', healthScore, 70, 45);
+      document.getElementById('portfolio-health-explanation').textContent = explainPortfolioHealthScore(aggregate);
+    } else {
+      document.getElementById('portfolio-health-explanation').textContent = 'Not enough data yet to compute a portfolio health score.';
     }
+
     document.getElementById('portfolio-redflag-total').textContent = `${totalRedFlags} red flag${totalRedFlags === 1 ? '' : 's'} across ${holdings.length} holding${holdings.length === 1 ? '' : 's'}`;
     document.getElementById('portfolio-redflag-breakdown').innerHTML = holdings
       .filter(h => h.redFlagCount)
       .map(h => `<div>${escapeHtml(h.ticker)}: ${h.redFlagCount} red flag${h.redFlagCount === 1 ? '' : 's'}</div>`)
       .join('');
 
-    // AI verdict — independent async, doesn't block the table from showing.
-    if (aggregateScore != null) {
-      loadPortfolioVerdict(holdings, aggregateScore);
+    // AI verdict — independent async, doesn't block the table from showing. Unchanged: still fed
+    // the plain position-weighted average (not the new composite healthScore), since
+    // api/portfolio-verdict.js's prompt specifically describes "weighted by current position
+    // size" — feeding it the composite would make that wording inaccurate. Out of scope to
+    // redesign that endpoint for this task (aggregation/display only).
+    if (avgScore != null) {
+      loadPortfolioVerdict(holdings, avgScore);
     } else {
       verdictEl.textContent = 'Not enough data to generate a verdict yet.';
     }
