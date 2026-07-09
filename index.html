@@ -2351,7 +2351,7 @@
         .from('notifications')
         .select('id, type, ticker, company_name, title, body, read, created_at')
         .eq('user_id', currentUser.id)
-        .in('type', ['score_change', 'red_flag', 'weekly_digest', 'earnings_upcoming', 'concentration_risk'])
+        .in('type', ['score_change', 'red_flag', 'red_flag_pattern', 'weekly_digest', 'earnings_upcoming', 'concentration_risk'])
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -2366,7 +2366,7 @@
         const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const title = escapeHtml(n.title);
         const body = escapeHtml(n.body);
-        const stripeColor = n.type === 'red_flag' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : 'var(--accent-2)';
+        const stripeColor = n.type === 'red_flag' || n.type === 'red_flag_pattern' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : 'var(--accent-2)';
         const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
         return `
           <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">

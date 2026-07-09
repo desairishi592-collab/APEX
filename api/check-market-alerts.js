@@ -6,6 +6,7 @@ import { runScoreMonitor } from '../lib/scoreMonitor.js';
 import { recordScoreSnapshots } from '../lib/scoreHistory.js';
 import { fetchNextEarningsDate, earningsSessionLabel } from '../lib/earnings.js';
 import { runConcentrationMonitor } from '../lib/concentrationMonitor.js';
+import { runCrossHoldingFlagMonitor } from '../lib/crossHoldingFlags.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
@@ -206,7 +207,8 @@ async function checkUpcomingEarnings(serviceRoleKey, earningsByTicker, rows) {
 // unique ticker across watchlist + portfolio holdings, same dedup principle; the earnings
 // calendar check further below shares one batched Finnhub calendar/earnings fetch the same way;
 // the sector concentration check further below reuses that same re-scan's sectorBenchmark.sector
-// field, with no fetch of its own at all.
+// field, with no fetch of its own at all; the cross-holding red-flag pattern check reuses that
+// same re-scan's redFlags, also with no fetch of its own.
 export default async function handler(req) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
@@ -264,6 +266,7 @@ export default async function handler(req) {
   // with no new Finnhub/Groq call, even though it's checked in its own separate try/catch.
   let scoreChanges = { checked: 0, notified: 0 };
   let scoreHistory = { inserted: 0 };
+  let crossHoldingPatterns = { checked: 0, notified: 0 };
   const freshByTicker = {};
   try {
     const origin = new URL(req.url).origin;
@@ -278,9 +281,26 @@ export default async function handler(req) {
       if (fresh) freshByTicker[ticker] = fresh;
     }));
 
+    // Cross-holding red-flag pattern detection runs FIRST, over the SAME already-computed
+    // freshByTicker data (no new fetches) across a user's combined watchlist + portfolio — a
+    // grouping step, not new detection logic. It must run ahead of runScoreMonitor below so its
+    // suppression map can stop the individual per-ticker red_flag notification from ALSO firing
+    // for a flag id that just got folded into a consolidated cross-holding notification.
+    let suppressedFlagsByTicker = new Map();
+    try {
+      const { suppressedFlagsByTicker: suppressed, ...crossHoldingResult } = await runCrossHoldingFlagMonitor(
+        serviceRoleKey, [...watchlistRows, ...portfolioRows], freshByTicker
+      );
+      suppressedFlagsByTicker = suppressed;
+      crossHoldingPatterns = crossHoldingResult;
+    } catch (e) {
+      console.error('Cross-holding pattern detection failed:', e.message);
+      crossHoldingPatterns = { checked: 0, notified: 0, error: 'Cross-holding pattern detection failed' };
+    }
+
     const [watchlistScoreChanges, portfolioScoreChanges] = await Promise.all([
-      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'watchlist', watchlistRows, freshByTicker),
-      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'portfolio_holdings', portfolioRows, freshByTicker)
+      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'watchlist', watchlistRows, freshByTicker, suppressedFlagsByTicker),
+      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'portfolio_holdings', portfolioRows, freshByTicker, suppressedFlagsByTicker)
     ]);
     scoreChanges = {
       checked: watchlistScoreChanges.checked + portfolioScoreChanges.checked,
@@ -335,7 +355,7 @@ export default async function handler(req) {
     concentrationRisk = { checked: 0, notified: 0, error: 'Concentration monitoring failed' };
   }
 
-  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, upcomingEarnings, concentrationRisk }), {
+  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, crossHoldingPatterns, upcomingEarnings, concentrationRisk }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }
