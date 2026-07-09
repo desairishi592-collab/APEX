@@ -742,6 +742,9 @@
         <h3 id="r-status">—</h3>
         <p id="r-summary">—</p>
         <span class="score-badge" id="r-badge">—</span>
+        <!-- STOCK ONLY: next earnings date, when Finnhub has one within the lookahead window
+             (lib/earnings.js) — same pill styling as the badge above, turquoise/orange system. -->
+        <span class="score-badge" id="r-earnings-badge" style="display:none; margin-left:6px;"></span>
       </div>
     </div>
 
@@ -2243,12 +2246,12 @@
 
   // APEX Agent's own feed — same `notifications` table the bell panel reads (loadNotifications
   // above), just scoped to the three types the Agent's own monitoring/digest crons create:
-  // 'score_change' and 'red_flag' from the daily monitoring cron (lib/scoreMonitor.js), and
-  // 'weekly_digest' from the weekly unprompted portfolio digest (lib/portfolioDigest.js, wired
-  // into api/weekly-digest.js) — a proactive summary generated on a schedule, not a reaction to
-  // a triggered threshold. Price alerts and watchlist-move notifications still show in the
-  // general bell panel, not here — this feed is specifically "what did the agent notice/report
-  // about my holdings' health."
+  // 'score_change', 'red_flag', and 'earnings_upcoming' from the daily monitoring cron
+  // (lib/scoreMonitor.js, api/check-market-alerts.js), and 'weekly_digest' from the weekly
+  // unprompted portfolio digest (lib/portfolioDigest.js, wired into api/weekly-digest.js) — a
+  // proactive summary generated on a schedule, not a reaction to a triggered threshold. Price
+  // alerts and watchlist-move notifications still show in the general bell panel, not here —
+  // this feed is specifically "what did the agent notice/report about my holdings' health."
   async function loadAgentAlerts() {
     const listEl = document.getElementById('agent-alerts-list');
     listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
@@ -2262,14 +2265,14 @@
         .from('notifications')
         .select('id, type, ticker, company_name, title, body, read, created_at')
         .eq('user_id', currentUser.id)
-        .in('type', ['score_change', 'red_flag', 'weekly_digest'])
+        .in('type', ['score_change', 'red_flag', 'weekly_digest', 'earnings_upcoming'])
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
 
       const rows = data || [];
       if (!rows.length) {
-        listEl.innerHTML = '<div class="history-empty">No alerts yet — add tickers to your watchlist or portfolio and APEX Agent will start watching them. Score/red-flag checks run daily, portfolio digests run weekly.</div>';
+        listEl.innerHTML = '<div class="history-empty">No alerts yet — add tickers to your watchlist or portfolio and APEX Agent will start watching them. Score/red-flag/earnings checks run daily, portfolio digests run weekly.</div>';
         return;
       }
 
@@ -2277,7 +2280,7 @@
         const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const title = escapeHtml(n.title);
         const body = escapeHtml(n.body);
-        const stripeColor = n.type === 'red_flag' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : 'var(--accent-2)';
+        const stripeColor = n.type === 'red_flag' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : 'var(--accent-2)';
         const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
         return `
           <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">
@@ -3562,6 +3565,21 @@
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
     drawRing('score-canvas', d.score, 70, 45);
+
+    // STOCK ONLY: next earnings date badge (lib/earnings.js) — hidden when there's no upcoming
+    // report within the lookahead window, or for owner-mode (non-stock) scans.
+    const earningsBadge = document.getElementById('r-earnings-badge');
+    if (earningsBadge) {
+      if (d.isPublicStock && d.nextEarnings && d.nextEarnings.date) {
+        const earningsDate = new Date(d.nextEarnings.date + 'T00:00:00Z');
+        const dateLabel = earningsDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+        const sessionLabel = { bmo: 'before open', amc: 'after close', dmh: 'during hours' }[d.nextEarnings.hour];
+        earningsBadge.textContent = `📅 Next earnings: ${dateLabel}${sessionLabel ? ` (${sessionLabel})` : ''}`;
+        earningsBadge.style.display = 'inline-block';
+      } else {
+        earningsBadge.style.display = 'none';
+      }
+    }
 
     // STOCK ONLY: explainable breakdown of the score above — each sub-score reuses the same
     // sector-benchmark data behind the red flags/industry comparison above, not recomputed.

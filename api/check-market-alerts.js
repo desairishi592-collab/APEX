@@ -4,6 +4,7 @@ import { createNotification, hasRecentNotification } from '../lib/notifications.
 import { fetchFreshAnalysis } from '../lib/rescan.js';
 import { runScoreMonitor } from '../lib/scoreMonitor.js';
 import { recordScoreSnapshots } from '../lib/scoreHistory.js';
+import { fetchNextEarningsDate, earningsSessionLabel } from '../lib/earnings.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
@@ -11,6 +12,12 @@ const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
 // checks below. This is an early-stage app with modest watchlist/portfolio volume today, but this
 // cap is a defensive circuit breaker against a runaway cron if that ever changes.
 const MAX_TICKERS_PER_RESCAN_RUN = 40;
+const EARNINGS_ALERT_WINDOW_DAYS = 3;    // "a few days out" — matches the task's own framing
+const EARNINGS_LOOKAHEAD_DAYS = 14;      // only need to know about earnings within ~2 weeks for
+                                          // this alert; a 90-day report-screen-style window would
+                                          // just waste Finnhub calls fetching dates never near enough to fire
+const EARNINGS_DEDUP_HOURS = 24 * 7;     // fire once per earnings event, not once per day it sits
+                                          // inside the alert window (same principle red-flag dedup uses)
 
 async function patchAlert(serviceRoleKey, id, updates) {
   try {
@@ -134,12 +141,69 @@ async function checkWatchlistMoves(serviceRoleKey, priceByTicker, rows) {
   return { checked: rows.length, moved: movedCount, notified: notifiedCount };
 }
 
+// Pure — no I/O, no randomness, safe to unit test directly. True only for a real, parseable
+// date that's today or up to EARNINGS_ALERT_WINDOW_DAYS from now — excludes past dates (already
+// reported) and anything further out (too early to be useful, and would otherwise re-fire once
+// per day as the cron ticks closer without dedup catching it, since dedup is keyed by ticker+type
+// not by the specific date).
+export function isEarningsWithinAlertWindow(dateStr, now = new Date()) {
+  if (!dateStr) return false;
+  const earningsDate = new Date(dateStr + 'T00:00:00Z');
+  if (isNaN(earningsDate.getTime())) return false;
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const daysUntil = (earningsDate - startOfToday) / (24 * 60 * 60 * 1000);
+  return daysUntil >= 0 && daysUntil <= EARNINGS_ALERT_WINDOW_DAYS;
+}
+
+// Batches one Finnhub calendar/earnings call per unique ticker (lib/earnings.js), same dedup
+// principle as the quote/re-scan batching above — a ticker shared across users only costs one call.
+async function fetchEarningsByTicker(finnhubKey, tickers) {
+  const earningsByTicker = {};
+  await Promise.all(tickers.map(async (ticker) => {
+    const earnings = await fetchNextEarningsDate(finnhubKey, ticker, EARNINGS_LOOKAHEAD_DAYS);
+    if (earnings) earningsByTicker[ticker] = earnings;
+  }));
+  return earningsByTicker;
+}
+
+// Checks every watchlist/portfolio row for an earnings report landing within the alert window.
+// In-app notification only — no email for this trigger, same as watchlist moves. Dedup window is
+// long enough (7 days) to fire exactly once per earnings event rather than once per day it
+// remains inside the 3-day window.
+async function checkUpcomingEarnings(serviceRoleKey, earningsByTicker, rows) {
+  let checked = 0, notifiedCount = 0;
+
+  for (const row of rows) {
+    const earnings = earningsByTicker[row.ticker];
+    if (!earnings || !isEarningsWithinAlertWindow(earnings.date)) continue;
+    checked++;
+
+    const alreadyNotified = await hasRecentNotification(serviceRoleKey, row.user_id, row.ticker, 'earnings_upcoming', EARNINGS_DEDUP_HOURS);
+    if (alreadyNotified) continue;
+
+    const dateLabel = new Date(earnings.date + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const sessionLabel = earningsSessionLabel(earnings.hour);
+    const created = await createNotification(serviceRoleKey, {
+      userId: row.user_id,
+      type: 'earnings_upcoming',
+      ticker: row.ticker,
+      companyName: row.company_name,
+      title: `${row.ticker} reports earnings ${dateLabel}`,
+      body: `${row.company_name || row.ticker} is scheduled to report earnings on ${dateLabel}${sessionLabel ? ` (${sessionLabel})` : ''}.`
+    });
+    if (created) notifiedCount++;
+  }
+
+  return { checked, notified: notifiedCount };
+}
+
 // Runs on a schedule (see vercel.json crons). Folded into one daily invocation rather
 // than a separate cron entry — Vercel's Hobby plan caps a project at 2 cron jobs, and
 // this repo already has 2 (this one + weekly-digest), so a 3rd risked a silent deploy
 // failure. Price alerts + watchlist moves share one batched Finnhub quote fetch across
 // their tickers; the APEX Agent score/red-flag monitoring below shares one re-scan per
-// unique ticker across watchlist + portfolio holdings, same dedup principle.
+// unique ticker across watchlist + portfolio holdings, same dedup principle; the earnings
+// calendar check further below shares one batched Finnhub calendar/earnings fetch the same way.
 export default async function handler(req) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
@@ -232,7 +296,29 @@ export default async function handler(req) {
     scoreChanges = { checked: 0, notified: 0, error: 'Score monitoring failed' };
   }
 
-  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory }), {
+  // Earnings calendar awareness: alerts watchlist/portfolio holdings whose next earnings report
+  // lands within a few days. Its own try/catch, isolated from the (heavier, LLM-backed) score
+  // monitoring above — a Finnhub calendar hiccup here shouldn't take down anything else.
+  let upcomingEarnings = { checked: 0, notified: 0 };
+  try {
+    const uniqueTickers = [...new Set([...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker)])]
+      .slice(0, MAX_TICKERS_PER_RESCAN_RUN);
+    const earningsByTicker = uniqueTickers.length ? await fetchEarningsByTicker(finnhubKey, uniqueTickers) : {};
+
+    const [watchlistEarnings, portfolioEarnings] = await Promise.all([
+      checkUpcomingEarnings(serviceRoleKey, earningsByTicker, watchlistRows),
+      checkUpcomingEarnings(serviceRoleKey, earningsByTicker, portfolioRows)
+    ]);
+    upcomingEarnings = {
+      checked: watchlistEarnings.checked + portfolioEarnings.checked,
+      notified: watchlistEarnings.notified + portfolioEarnings.notified
+    };
+  } catch (e) {
+    console.error('Earnings calendar check failed:', e.message);
+    upcomingEarnings = { checked: 0, notified: 0, error: 'Earnings calendar check failed' };
+  }
+
+  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, upcomingEarnings }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }
