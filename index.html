@@ -1097,6 +1097,18 @@
       </div>
     </div>
 
+    <!-- Sector breakdown across combined watchlist + portfolio — informational only, a pattern a
+         human wouldn't easily piece together by eyeballing separate stock reports one at a time.
+         Separate from the Portfolio Health Score above (portfolio-only, one weighted input into a
+         composite number) — this is the full breakdown, always shown, watchlist+portfolio combined. -->
+    <div class="dive-card" id="portfolio-sector-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Sector breakdown</div>
+        <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">Across your combined watchlist and portfolio.</p>
+        <div id="portfolio-sector-rows"></div>
+      </div>
+    </div>
+
     <div class="dive-card">
       <div class="dive-body">
         <div class="section-title">AI portfolio verdict</div>
@@ -2318,13 +2330,14 @@
   }
 
   // APEX Agent's own feed — same `notifications` table the bell panel reads (loadNotifications
-  // above), just scoped to the three types the Agent's own monitoring/digest crons create:
-  // 'score_change', 'red_flag', and 'earnings_upcoming' from the daily monitoring cron
-  // (lib/scoreMonitor.js, api/check-market-alerts.js), and 'weekly_digest' from the weekly
-  // unprompted portfolio digest (lib/portfolioDigest.js, wired into api/weekly-digest.js) — a
-  // proactive summary generated on a schedule, not a reaction to a triggered threshold. Price
-  // alerts and watchlist-move notifications still show in the general bell panel, not here —
-  // this feed is specifically "what did the agent notice/report about my holdings' health."
+  // above), just scoped to the types the Agent's own monitoring/digest crons create:
+  // 'score_change', 'red_flag', 'earnings_upcoming', and 'concentration_risk' from the daily
+  // monitoring cron (lib/scoreMonitor.js, lib/concentrationMonitor.js, api/check-market-alerts.js),
+  // and 'weekly_digest' from the weekly unprompted portfolio digest (lib/portfolioDigest.js, wired
+  // into api/weekly-digest.js) — a proactive summary generated on a schedule, not a reaction to a
+  // triggered threshold. Price alerts and watchlist-move notifications still show in the general
+  // bell panel, not here — this feed is specifically "what did the agent notice/report about my
+  // holdings' health."
   async function loadAgentAlerts() {
     const listEl = document.getElementById('agent-alerts-list');
     listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
@@ -2338,7 +2351,7 @@
         .from('notifications')
         .select('id, type, ticker, company_name, title, body, read, created_at')
         .eq('user_id', currentUser.id)
-        .in('type', ['score_change', 'red_flag', 'weekly_digest', 'earnings_upcoming'])
+        .in('type', ['score_change', 'red_flag', 'weekly_digest', 'earnings_upcoming', 'concentration_risk'])
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -3461,11 +3474,95 @@
   function openPortfolioPage() {
     show('s-portfolio');
     loadPortfolioPage();
+    loadSectorBreakdown();
   }
 
   // Populated at the end of loadPortfolioPage() below — read by exportPortfolioCsv() so the CSV
   // export reflects exactly what's on screen without a second fetch.
   let portfolioExportRows = [];
+
+  // Sector breakdown across a user's COMBINED watchlist + portfolio — independent of
+  // loadPortfolioPage() above (which only covers portfolio_holdings and returns early when it's
+  // empty) since a user might have zero portfolio holdings but a populated watchlist, and the
+  // breakdown should still show for that. Reuses fetchApexScoreForHolding()'s existing
+  // sessionStorage-cached /api/analyze call (same mechanism the Portfolio Health Score already
+  // uses) rather than any new endpoint — a ticker already fetched by loadPortfolioPage this same
+  // page load is served from cache here, not re-fetched.
+  async function loadSectorBreakdown() {
+    const card = document.getElementById('portfolio-sector-card');
+    if (!card) return;
+    if (!currentUser) { card.style.display = 'none'; return; }
+
+    let watchlistRows = [], portfolioRows = [];
+    try {
+      const [wl, pf] = await Promise.all([
+        sb.from('watchlist').select('ticker, company_name').eq('user_id', currentUser.id),
+        sb.from('portfolio_holdings').select('ticker, company_name').eq('user_id', currentUser.id)
+      ]);
+      if (wl.error) throw wl.error;
+      if (pf.error) throw pf.error;
+      watchlistRows = wl.data || [];
+      portfolioRows = pf.data || [];
+    } catch (e) {
+      card.style.display = 'none';
+      return;
+    }
+
+    // Dedup by ticker across both tables — same principle lib/concentrationMonitor.js uses
+    // server-side, so a ticker tracked in both places counts once, not twice.
+    const tickerMap = new Map();
+    for (const r of [...watchlistRows, ...portfolioRows]) {
+      if (!tickerMap.has(r.ticker)) tickerMap.set(r.ticker, r.company_name || r.ticker);
+    }
+    if (!tickerMap.size) {
+      card.style.display = 'none';
+      return;
+    }
+
+    const pairs = await Promise.all([...tickerMap.entries()].map(async ([ticker, companyName]) => {
+      const scoreData = await fetchApexScoreForHolding(ticker, companyName);
+      return { ticker, sector: scoreData?.sector || null };
+    }));
+
+    renderSectorBreakdown(pairs);
+  }
+
+  // Strictly informational display — "X% of your tracked holdings are in [sector]," never a
+  // recommendation. Flat single-color bars (turquoise), width = share, consistent with the rest
+  // of the design system rather than a multi-color legend.
+  function renderSectorBreakdown(pairs) {
+    const card = document.getElementById('portfolio-sector-card');
+    const rowsEl = document.getElementById('portfolio-sector-rows');
+    if (!card || !rowsEl) return;
+
+    const resolved = pairs.filter(p => p.sector);
+    if (!resolved.length) {
+      card.style.display = 'none';
+      return;
+    }
+
+    const bySector = {};
+    for (const p of resolved) {
+      if (!bySector[p.sector]) bySector[p.sector] = [];
+      bySector[p.sector].push(p.ticker);
+    }
+    const rows = Object.entries(bySector)
+      .map(([sector, tickers]) => ({ sector, tickers, pct: Math.round((tickers.length / resolved.length) * 100) }))
+      .sort((a, b) => b.tickers.length - a.tickers.length);
+
+    card.style.display = 'block';
+    rowsEl.innerHTML = rows.map(r => `
+      <div class="percentile-row">
+        <div class="percentile-row-head">
+          <span class="percentile-metric">${escapeHtml(r.sector)}</span>
+          <span class="percentile-value">${r.pct}% (${r.tickers.length} of ${resolved.length})</span>
+        </div>
+        <div class="percentile-bar-track">
+          <div class="percentile-bar-fill" style="width:${r.pct}%; background:var(--accent-2);"></div>
+        </div>
+        <div class="percentile-summary">${r.tickers.map(t => escapeHtml(t)).join(', ')}</div>
+      </div>`).join('');
+  }
 
   async function loadPortfolioPage() {
     const listEl = document.getElementById('portfolio-holdings-list');

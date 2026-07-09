@@ -5,6 +5,7 @@ import { fetchFreshAnalysis } from '../lib/rescan.js';
 import { runScoreMonitor } from '../lib/scoreMonitor.js';
 import { recordScoreSnapshots } from '../lib/scoreHistory.js';
 import { fetchNextEarningsDate, earningsSessionLabel } from '../lib/earnings.js';
+import { runConcentrationMonitor } from '../lib/concentrationMonitor.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
@@ -203,7 +204,9 @@ async function checkUpcomingEarnings(serviceRoleKey, earningsByTicker, rows) {
 // failure. Price alerts + watchlist moves share one batched Finnhub quote fetch across
 // their tickers; the APEX Agent score/red-flag monitoring below shares one re-scan per
 // unique ticker across watchlist + portfolio holdings, same dedup principle; the earnings
-// calendar check further below shares one batched Finnhub calendar/earnings fetch the same way.
+// calendar check further below shares one batched Finnhub calendar/earnings fetch the same way;
+// the sector concentration check further below reuses that same re-scan's sectorBenchmark.sector
+// field, with no fetch of its own at all.
 export default async function handler(req) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
@@ -256,14 +259,17 @@ export default async function handler(req) {
   // APEX Agent: periodic re-score + red-flag check for watchlist/portfolio holdings, on top of
   // the price-only checks above. Isolated in its own try/catch so a failure here (e.g. Groq
   // temporarily down) can't take down the already-working price alerts/watchlist moves.
+  // freshByTicker is declared here (not inside the try block) so the concentration-monitoring
+  // section further below can reuse the same fresh scan data — including sectorBenchmark.sector —
+  // with no new Finnhub/Groq call, even though it's checked in its own separate try/catch.
   let scoreChanges = { checked: 0, notified: 0 };
   let scoreHistory = { inserted: 0 };
+  const freshByTicker = {};
   try {
     const origin = new URL(req.url).origin;
     const uniqueTickers = [...new Set([...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker)])]
       .slice(0, MAX_TICKERS_PER_RESCAN_RUN);
 
-    const freshByTicker = {};
     const companyNameByTicker = {};
     await Promise.all(uniqueTickers.map(async (ticker) => {
       const sourceRow = watchlistRows.find(r => r.ticker === ticker) || portfolioRows.find(r => r.ticker === ticker);
@@ -318,7 +324,18 @@ export default async function handler(req) {
     upcomingEarnings = { checked: 0, notified: 0, error: 'Earnings calendar check failed' };
   }
 
-  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, upcomingEarnings }), {
+  // Sector concentration awareness: reuses freshByTicker (populated above for score monitoring —
+  // see the comment on its declaration) rather than a new fetch. Isolated in its own try/catch so
+  // a failure here can't take down anything else that already succeeded this run.
+  let concentrationRisk = { checked: 0, notified: 0 };
+  try {
+    concentrationRisk = await runConcentrationMonitor(serviceRoleKey, watchlistRows, portfolioRows, freshByTicker);
+  } catch (e) {
+    console.error('Concentration monitoring failed:', e.message);
+    concentrationRisk = { checked: 0, notified: 0, error: 'Concentration monitoring failed' };
+  }
+
+  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, upcomingEarnings, concentrationRisk }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }
