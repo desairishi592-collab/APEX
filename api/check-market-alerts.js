@@ -3,6 +3,7 @@ export const config = { runtime: 'edge' };
 import { createNotification, hasRecentNotification } from '../lib/notifications.js';
 import { fetchFreshAnalysis } from '../lib/rescan.js';
 import { runScoreMonitor } from '../lib/scoreMonitor.js';
+import { recordScoreSnapshots } from '../lib/scoreHistory.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
@@ -192,14 +193,17 @@ export default async function handler(req) {
   // the price-only checks above. Isolated in its own try/catch so a failure here (e.g. Groq
   // temporarily down) can't take down the already-working price alerts/watchlist moves.
   let scoreChanges = { checked: 0, notified: 0 };
+  let scoreHistory = { inserted: 0 };
   try {
     const origin = new URL(req.url).origin;
     const uniqueTickers = [...new Set([...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker)])]
       .slice(0, MAX_TICKERS_PER_RESCAN_RUN);
 
     const freshByTicker = {};
+    const companyNameByTicker = {};
     await Promise.all(uniqueTickers.map(async (ticker) => {
       const sourceRow = watchlistRows.find(r => r.ticker === ticker) || portfolioRows.find(r => r.ticker === ticker);
+      companyNameByTicker[ticker] = sourceRow?.company_name ?? null;
       const fresh = await fetchFreshAnalysis(origin, ticker, sourceRow?.company_name);
       if (fresh) freshByTicker[ticker] = fresh;
     }));
@@ -212,12 +216,23 @@ export default async function handler(req) {
       checked: watchlistScoreChanges.checked + portfolioScoreChanges.checked,
       notified: watchlistScoreChanges.notified + portfolioScoreChanges.notified
     };
+
+    // Foundational history capture for future features (weekly digest trend lines, score-vs-price
+    // divergence detection, a backtest view) — reuses the same freshByTicker data computed above,
+    // so this is a DB write only, no new Finnhub/Groq calls. Its own try/catch so a failure here
+    // can't take down the score-change alerts that already succeeded this run.
+    try {
+      scoreHistory = await recordScoreSnapshots(serviceRoleKey, SUPABASE_URL, freshByTicker, companyNameByTicker);
+    } catch (e) {
+      console.error('Score history snapshot failed:', e.message);
+      scoreHistory = { inserted: 0, error: 'Score history snapshot failed' };
+    }
   } catch (e) {
     console.error('Score monitoring failed:', e.message);
     scoreChanges = { checked: 0, notified: 0, error: 'Score monitoring failed' };
   }
 
-  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges }), {
+  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }
