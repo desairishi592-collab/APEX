@@ -2221,11 +2221,13 @@
   }
 
   // APEX Agent's own feed — same `notifications` table the bell panel reads (loadNotifications
-  // above), just scoped to the two types the daily monitoring cron creates (lib/scoreMonitor.js):
-  // 'score_change' (a watchlist/portfolio holding's APEX score moved meaningfully) and
-  // 'red_flag' (a new medium/high-severity flag showed up on a re-scan). Price alerts and
-  // watchlist-move notifications still show in the general bell panel, not here — this feed is
-  // specifically "what did the agent notice about my holdings' health."
+  // above), just scoped to the three types the Agent's own monitoring/digest crons create:
+  // 'score_change' and 'red_flag' from the daily monitoring cron (lib/scoreMonitor.js), and
+  // 'weekly_digest' from the weekly unprompted portfolio digest (lib/portfolioDigest.js, wired
+  // into api/weekly-digest.js) — a proactive summary generated on a schedule, not a reaction to
+  // a triggered threshold. Price alerts and watchlist-move notifications still show in the
+  // general bell panel, not here — this feed is specifically "what did the agent notice/report
+  // about my holdings' health."
   async function loadAgentAlerts() {
     const listEl = document.getElementById('agent-alerts-list');
     listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
@@ -2239,14 +2241,14 @@
         .from('notifications')
         .select('id, type, ticker, company_name, title, body, read, created_at')
         .eq('user_id', currentUser.id)
-        .in('type', ['score_change', 'red_flag'])
+        .in('type', ['score_change', 'red_flag', 'weekly_digest'])
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
 
       const rows = data || [];
       if (!rows.length) {
-        listEl.innerHTML = '<div class="history-empty">No alerts yet — add tickers to your watchlist or portfolio and APEX Agent will start watching them. Score/red-flag checks run daily.</div>';
+        listEl.innerHTML = '<div class="history-empty">No alerts yet — add tickers to your watchlist or portfolio and APEX Agent will start watching them. Score/red-flag checks run daily, portfolio digests run weekly.</div>';
         return;
       }
 
@@ -2254,7 +2256,7 @@
         const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const title = escapeHtml(n.title);
         const body = escapeHtml(n.body);
-        const stripeColor = n.type === 'red_flag' ? 'var(--red)' : 'var(--accent-2)';
+        const stripeColor = n.type === 'red_flag' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : 'var(--accent-2)';
         const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
         return `
           <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">
