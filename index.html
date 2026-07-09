@@ -180,6 +180,7 @@
     .impact-badge.positive { background: var(--green-dim); color: var(--green); border: 1px solid rgba(21,131,122,0.25); }
     .impact-badge.negative { background: var(--red-dim); color: var(--red); border: 1px solid rgba(201,43,37,0.25); }
     .impact-badge.neutral { background: rgba(0,0,0,0.05); color: var(--muted); border: 1px solid var(--border); }
+    .impact-badge.unknown { background: rgba(0,0,0,0.05); color: var(--muted); border: 1px solid var(--border); }
     .news-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
     .news-row:last-child { border-bottom: none; }
     .news-row-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
@@ -920,6 +921,22 @@
       <div class="dive-body">
         <div class="section-title">Red flags</div>
         <div id="r-red-flags-rows"></div>
+      </div>
+    </div>
+
+    <!-- STOCK ONLY: news sentiment — a qualitative, holistic read of recent media coverage tone.
+         Deliberately NOT a numeric score and NOT folded into the APEX score above — see
+         api/news.js's classifySentiment() and lib/subScores.js's "no fabricated precision"
+         principle. Always shown (never silently hidden) so sparse-data cases are communicated,
+         not just absent. -->
+    <div class="dive-card" id="r-sentiment-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">News sentiment</div>
+        <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">A qualitative read of recent coverage tone — not part of the APEX score.</p>
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+          <span class="impact-badge" id="r-sentiment-badge">—</span>
+        </div>
+        <div style="font-size:13px; color:var(--text); line-height:1.5;" id="r-sentiment-explanation"></div>
       </div>
     </div>
 
@@ -3215,6 +3232,10 @@
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Could not load news');
 
+      // Rendered regardless of how many headlines came back (even zero) — a qualitative "not
+      // enough data" message is still useful information, not a reason to hide the section.
+      renderNewsSentiment(data.sentiment);
+
       newsPageData = data.news || [];
       if (!newsPageData.length) {
         card.style.display = 'none';
@@ -3228,9 +3249,32 @@
       rowsEl.innerHTML = top3.map(renderNewsRow).join('');
       viewAllBtn.style.display = newsPageData.length > 3 ? 'block' : 'none';
     } catch (e) {
-      // Non-fatal: news is supplementary, not critical path — just hide the card
+      // Non-fatal: news is supplementary, not critical path — just hide the news card, but still
+      // show the sentiment card with a graceful "couldn't load" state rather than leaving it in
+      // whatever stale state it was in from a previous scan.
       card.style.display = 'none';
+      renderNewsSentiment(null);
     }
+  }
+
+  // News sentiment is deliberately qualitative-only — a labeled badge + one-line explanation,
+  // never a number, never folded into the APEX score. See api/news.js's classifySentiment() for
+  // the server-side classification and the same "don't fabricate precision" reasoning
+  // lib/subScores.js already documents for the real sub-scores.
+  function renderNewsSentiment(sentiment) {
+    const card = document.getElementById('r-sentiment-card');
+    const badge = document.getElementById('r-sentiment-badge');
+    const explanationEl = document.getElementById('r-sentiment-explanation');
+    if (!card) return;
+
+    const s = sentiment && ['positive', 'negative', 'neutral', 'unknown'].includes(sentiment.sentiment)
+      ? sentiment
+      : { sentiment: 'unknown', explanation: 'Could not load news sentiment right now.' };
+
+    card.style.display = 'block';
+    badge.className = 'impact-badge ' + s.sentiment;
+    badge.textContent = s.sentiment === 'unknown' ? 'Not enough data' : s.sentiment;
+    explanationEl.textContent = s.explanation || '';
   }
 
   function renderNewsRow(item) {
@@ -4006,6 +4050,8 @@
         loadNewsPreview(currentStockTicker, d.score, d.redFlags);
       } else {
         newsCard.style.display = 'none';
+        const sentimentCard = document.getElementById('r-sentiment-card');
+        if (sentimentCard) sentimentCard.style.display = 'none';
       }
     }
 
