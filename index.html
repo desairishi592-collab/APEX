@@ -754,6 +754,24 @@
       </div>
     </div>
 
+    <!-- STOCK ONLY: score history trend chart, built from the user's own past scans of this
+         ticker (scans.full_data, already saved on every scan — no new pipeline). Distinct from
+         the existing PRO "score trend" card below (#r-trend-card, business-name-keyed list,
+         owner-mode-oriented) — different feature, different data shape (a chart of THIS ticker's
+         score vs. a list of past scores for a business name), so it gets its own IDs/function
+         names rather than reusing that one. -->
+    <div class="dive-card" id="r-stock-trend-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Score trend</div>
+        <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">Based on your own past scans of this stock.</p>
+        <div id="r-stock-trend-canvas-wrap" style="display:none;">
+          <canvas id="stock-score-trend-canvas" width="600" height="140" style="max-width:100%; height:auto; display:block;"></canvas>
+          <div id="r-stock-trend-meta" style="font-size:12px; color:var(--muted); margin-top:8px; font-family:var(--mono);"></div>
+        </div>
+        <div id="r-stock-trend-empty" style="display:none; font-size:13px; color:var(--muted);"></div>
+      </div>
+    </div>
+
     <!-- STOCK ONLY: separate stock safety score (Buy/Hold/Sell), independent of business health score above -->
     <div class="score-card" id="r-stock-score-card" style="display:none;">
       <div class="score-ring-wrap">
@@ -1812,7 +1830,10 @@
     scanMode = row.mode === 'investor' ? 'investor' : 'owner';
     scanData = row.full_data;
     currentScanBizName = row.business_name || '';
-    currentStockTicker = scanData.isPublicStock ? (row.business_name || null) : null;
+    // Prefers the ticker embedded directly in full_data (saved on every scan going forward —
+    // see saveScanAndIncrement call sites) over business_name, which stores the typed company
+    // name when one was provided and is only the ticker by coincidence otherwise.
+    currentStockTicker = scanData.isPublicStock ? ((scanData.ticker || row.business_name || null)) : null;
 
     closeHistory();
     renderResults(scanData);
@@ -2654,6 +2675,10 @@
       currentStockTicker = ticker.toUpperCase();
       renderResults(data);
       if (currentUser) {
+        // Embedded directly in the saved full_data (no schema change needed) so the score-trend
+        // chart can reliably match past scans of the SAME ticker later, rather than guessing from
+        // business_name (which stores the typed company name when provided, not always the ticker).
+        data.ticker = currentStockTicker;
         await saveScanAndIncrement(companyName || ticker, 'Public stock', data);
       } else if (isGuest) {
         guestScanCount += 1;
@@ -2777,6 +2802,8 @@
       await renderComparison(scanData, currentScanBizName, compareStockData, compareStockName, 'compare-result-area', 'compare-loading');
 
       if (currentUser) {
+        // See the primary single-stock scan flow above for why this is embedded directly.
+        data.ticker = trimmedTicker.toUpperCase();
         await saveScanAndIncrement(name, 'Public stock', data);
       } else if (isGuest) {
         guestScanCount += 1;
@@ -2981,6 +3008,8 @@
       await renderComparison(sideA.data, sideA.name, sideB.data, sideB.name, 'standalone-compare-result-area', 'standalone-compare-loading');
 
       if (currentUser) {
+        // See the primary single-stock scan flow above for why this is embedded directly.
+        sideA.data.ticker = tickerA.toUpperCase();
         await saveScanAndIncrement(sideA.name, 'Public stock', sideA.data);
       } else if (isGuest) {
         guestScanCount += 1;
@@ -3463,6 +3492,9 @@
       }
     }
 
+    // STOCK ONLY: score trend chart, built from this user's own past scans of this ticker.
+    loadStockScoreTrend(d.isPublicStock ? currentStockTicker : null);
+
     const guestNotice = document.getElementById('guest-notice');
     if (guestNotice) {
       guestNotice.style.display = (isGuest && !currentUser) ? 'block' : 'none';
@@ -3895,6 +3927,135 @@
     ctx.beginPath();
     ctx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + (score/100)*Math.PI*2);
     ctx.strokeStyle = color; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke();
+  }
+
+  // ── SCORE HISTORY TREND CHART (stock scans only) ──
+  // Reads the user's own past scans of this ticker straight from the `scans` table's full_data
+  // JSONB (already saved on every scan) — no new pipeline, no new table read. Deliberately NOT
+  // sourced from the global score_history table built for the Agent digest feature: that table
+  // only has data for tickers on someone's watchlist/portfolio (not every scanned ticker) and has
+  // no client-readable RLS policy yet, whereas scans/full_data works for any ticker any logged-in
+  // user has ever scanned, with zero migration required.
+  const SCORE_TREND_QUERY_LIMIT = 100; // generous cap on past investor-mode scans fetched before
+                                        // filtering client-side to this specific ticker
+
+  function stockScoreTierColor(score) {
+    return score >= 70 ? '#15837a' : score >= 45 ? '#b35700' : '#c92b25';
+  }
+
+  async function loadStockScoreTrend(ticker) {
+    const card = document.getElementById('r-stock-trend-card');
+    if (!card) return;
+
+    if (!ticker || !currentUser) {
+      card.style.display = 'none';
+      return;
+    }
+
+    const canvasWrap = document.getElementById('r-stock-trend-canvas-wrap');
+    const emptyEl = document.getElementById('r-stock-trend-empty');
+    const metaEl = document.getElementById('r-stock-trend-meta');
+    card.style.display = 'block';
+    canvasWrap.style.display = 'none';
+    emptyEl.style.display = 'none';
+    metaEl.textContent = '';
+
+    try {
+      const { data, error } = await sb
+        .from('scans')
+        .select('score, created_at, business_name, full_data')
+        .eq('user_id', currentUser.id)
+        .eq('mode', 'investor')
+        .order('created_at', { ascending: true })
+        .limit(SCORE_TREND_QUERY_LIMIT);
+      if (error) throw error;
+
+      const upperTicker = ticker.toUpperCase();
+      const points = (data || [])
+        .filter(row => {
+          const fd = row.full_data;
+          if (!fd || !fd.isPublicStock || typeof row.score !== 'number') return false;
+          // Reliable match once full_data.ticker is present (every scan saved going forward —
+          // see the saveScanAndIncrement call sites). Falls back to business_name for scans
+          // saved before this field existed, matching the common case where no separate company
+          // name was typed (business_name then equals the ticker itself).
+          if (fd.ticker) return fd.ticker === upperTicker;
+          return (row.business_name || '').trim().toUpperCase() === upperTicker;
+        })
+        .map(row => ({ score: row.score, date: new Date(row.created_at) }));
+
+      if (!points.length) {
+        card.style.display = 'none';
+        return;
+      }
+
+      if (points.length === 1) {
+        emptyEl.style.display = 'block';
+        emptyEl.textContent = `Only one scan of ${upperTicker} on record — scan it again later to start building a score trend.`;
+        return;
+      }
+
+      canvasWrap.style.display = 'block';
+      drawStockScoreTrendChart('stock-score-trend-canvas', points);
+
+      const first = points[0], last = points[points.length - 1];
+      const delta = last.score - first.score;
+      const sign = delta > 0 ? '+' : '';
+      const dateFmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      metaEl.textContent = `${dateFmt(first.date)} → ${dateFmt(last.date)}: ${first.score} → ${last.score} (${sign}${delta})`;
+    } catch (e) {
+      card.style.display = 'none';
+    }
+  }
+
+  // Hand-rolled canvas line chart (no chart library in this project) — flat colors, no
+  // gradients, fixed 0-100 axis so repeat scans are visually honest rather than auto-scaled to
+  // exaggerate small moves. Line + baseline reuse the same turquoise/amber/red ink colors
+  // drawRing() already uses for score tiers, for visual consistency across the report screen.
+  function drawStockScoreTrendChart(canvasId, points) {
+    const c = document.getElementById(canvasId);
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const w = c.width, h = c.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const padX = 12, padY = 16;
+    const plotW = w - padX * 2, plotH = h - padY * 2;
+    const xFor = i => padX + (points.length === 1 ? plotW / 2 : (i / (points.length - 1)) * plotW);
+    const yFor = score => padY + plotH - (score / 100) * plotH;
+
+    // Flat baseline grid lines at 0/50/100
+    ctx.strokeStyle = 'rgba(11,11,12,0.08)';
+    ctx.lineWidth = 1;
+    [0, 50, 100].forEach(s => {
+      const y = yFor(s);
+      ctx.beginPath();
+      ctx.moveTo(padX, y);
+      ctx.lineTo(w - padX, y);
+      ctx.stroke();
+    });
+
+    // Line connecting the scores, flat turquoise ink (same color drawRing() uses for a good score)
+    ctx.strokeStyle = '#15837a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = xFor(i), y = yFor(p.score);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Points, colored by score tier (same thresholds as the scan-history list's hs-good/warn/bad)
+    points.forEach((p, i) => {
+      const x = xFor(i), y = yFor(p.score);
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = stockScoreTierColor(p.score);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+    });
   }
 
   function renderTab(key) {
