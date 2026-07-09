@@ -272,6 +272,16 @@
     .competitor-card .competitor-ticker { font-family: var(--mono); font-weight: 700; font-size: 15px; color: var(--text); margin-bottom: 2px; }
     .competitor-card .competitor-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* Peer comparison table — flat, bordered, no gradients, same turquoise/orange system. */
+    .peer-compare-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .peer-compare-table th, .peer-compare-table td { padding: 8px 10px; text-align: center; border: 1px solid var(--border); white-space: nowrap; }
+    .peer-compare-table th:first-child, .peer-compare-table td:first-child { text-align: left; font-weight: 500; color: var(--muted); white-space: normal; }
+    .peer-compare-table thead th { background: var(--surface); font-weight: 600; color: var(--text); font-family: var(--mono); }
+    .peer-compare-table td.pc-self, .peer-compare-table th.pc-self { background: var(--accent-2-dim); font-weight: 600; }
+    .peer-compare-table td.pc-score-good { color: var(--green); font-weight: 600; }
+    .peer-compare-table td.pc-score-warn { color: var(--amber); font-weight: 600; }
+    .peer-compare-table td.pc-score-bad { color: var(--red); font-weight: 600; }
+
     /* FIX THIS FIRST CALLOUT */
     .fix-first-card { background: var(--amber-dim); border: 1px solid rgba(179,87,0,0.4); border-radius: var(--radius); padding: 1.125rem 1.25rem; margin-bottom: 1.25rem; display: flex; gap: 12px; align-items: flex-start; }
     .fix-first-card .insight-ico { background: rgba(179,87,0,0.3); }
@@ -941,6 +951,20 @@
         </div>
 
         <div id="compare-result-area" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- STOCK ONLY: real peer comparison table — actually scanning the same peers already
+         identified above (fetchCompetitors(), lib/stockAnalysis.js), not just naming them. -->
+    <div class="dive-card" id="r-peer-compare-card" style="display:none;">
+      <div class="dive-body">
+        <div class="section-title">Peer comparison</div>
+        <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">Real APEX scores for this company's closest peers, not just names.</p>
+        <div id="r-peer-compare-loading" style="display:none; font-size:13px; color:var(--muted);">Scanning peers…</div>
+        <div id="r-peer-compare-table-wrap" style="display:none; overflow-x:auto;">
+          <table id="r-peer-compare-table" class="peer-compare-table"></table>
+        </div>
+        <div id="r-peer-compare-empty" style="display:none; font-size:13px; color:var(--muted);"></div>
       </div>
     </div>
 
@@ -2694,6 +2718,83 @@
     }
   }
 
+  // ── REAL PEER COMPARISON TABLE ──
+  // Actually scans the peers already identified by fetchCompetitors() (lib/stockAnalysis.js),
+  // via api/peer-comparison.js, which caches results server-side (lib/peerCache.js, ~24h) so a
+  // popular peer set doesn't get re-scanned on every view. Lazy-loaded after the main report
+  // renders (same pattern as loadStockScoreTrend/loadNewsPreview) so it never blocks the
+  // primary scan from showing.
+  const PEER_COMPARE_SUB_CATEGORIES = ['Profitability', 'Financial Health', 'Valuation', 'Risk (Volatility)', 'Momentum'];
+
+  function peerScoreClass(score) {
+    if (score == null) return '';
+    return score >= 70 ? 'pc-score-good' : score >= 45 ? 'pc-score-warn' : 'pc-score-bad';
+  }
+
+  function peerSubScoreValue(row, category) {
+    const s = Array.isArray(row.subScores) ? row.subScores.find(x => x.category === category) : null;
+    return s ? s.score : null;
+  }
+
+  function buildPeerCompareTableHtml(rows) {
+    const th = (r) => `<th${r.isSelf ? ' class="pc-self"' : ''}>${escapeHtml(r.ticker)}</th>`;
+    const td = (r, content, extraClass = '') => `<td class="${r.isSelf ? 'pc-self ' : ''}${extraClass}">${content}</td>`;
+
+    const headerRow = `<tr><th>Metric</th>${rows.map(th).join('')}</tr>`;
+    const scoreRow = `<tr><td>APEX Score</td>${rows.map(r => td(r, r.score ?? '—', peerScoreClass(r.score))).join('')}</tr>`;
+    const peRow = `<tr><td>P/E</td>${rows.map(r => td(r, r.peRatio != null ? r.peRatio.toFixed(1) : '—')).join('')}</tr>`;
+    const deRow = `<tr><td>D/E</td>${rows.map(r => td(r, r.debtEquity != null ? r.debtEquity.toFixed(2) : '—')).join('')}</tr>`;
+    const subRows = PEER_COMPARE_SUB_CATEGORIES.map(cat => {
+      const cells = rows.map(r => { const v = peerSubScoreValue(r, cat); return td(r, v != null ? `${v}/10` : '—'); }).join('');
+      return `<tr><td>${escapeHtml(cat)}</td>${cells}</tr>`;
+    }).join('');
+
+    return `<thead>${headerRow}</thead><tbody>${scoreRow}${peRow}${deRow}${subRows}</tbody>`;
+  }
+
+  async function loadPeerComparison(selfRow, competitors) {
+    const card = document.getElementById('r-peer-compare-card');
+    if (!card) return;
+
+    if (!Array.isArray(competitors) || !competitors.length) {
+      card.style.display = 'none';
+      return;
+    }
+
+    const loadingEl = document.getElementById('r-peer-compare-loading');
+    const tableWrap = document.getElementById('r-peer-compare-table-wrap');
+    const emptyEl = document.getElementById('r-peer-compare-empty');
+    card.style.display = 'block';
+    loadingEl.style.display = 'block';
+    tableWrap.style.display = 'none';
+    emptyEl.style.display = 'none';
+
+    try {
+      const res = await fetch('/api/peer-comparison', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peers: competitors.map(c => ({ ticker: c.ticker, companyName: c.companyName })) })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to load peer comparison');
+
+      const rows = [selfRow, ...(data.comparisons || [])];
+      if (rows.length < 2) {
+        emptyEl.textContent = 'Not enough peer data available for a comparison right now.';
+        emptyEl.style.display = 'block';
+        return;
+      }
+
+      document.getElementById('r-peer-compare-table').innerHTML = buildPeerCompareTableHtml(rows);
+      tableWrap.style.display = 'block';
+    } catch (e) {
+      emptyEl.textContent = 'Could not load peer comparison right now.';
+      emptyEl.style.display = 'block';
+    } finally {
+      loadingEl.style.display = 'none';
+    }
+  }
+
   // ── SIDE-BY-SIDE STOCK COMPARISON ──
   function showCompareSearch() {
     document.getElementById('compare-cta-btn').style.display = 'none';
@@ -3813,8 +3914,19 @@
         document.getElementById('compare-result-area').style.display = 'none';
         document.getElementById('compare-result-area').innerHTML = '';
         renderCompetitors(d.competitors);
+        loadPeerComparison({
+          ticker: currentStockTicker,
+          companyName: currentScanBizName,
+          score: d.score,
+          subScores: d.subScores,
+          peRatio: d.rawMetrics?.peRaw ?? null,
+          debtEquity: d.rawMetrics?.debtEquityRaw ?? null,
+          isSelf: true
+        }, d.competitors);
       } else {
         compareCard.style.display = 'none';
+        const peerCompareCard = document.getElementById('r-peer-compare-card');
+        if (peerCompareCard) peerCompareCard.style.display = 'none';
       }
     }
 
