@@ -309,8 +309,8 @@ export default async function handler(req) {
     }
 
     const [watchlistScoreChanges, portfolioScoreChanges] = await Promise.all([
-      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'watchlist', watchlistRows, freshByTicker, suppressedFlagsByTicker),
-      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'portfolio_holdings', portfolioRows, freshByTicker, suppressedFlagsByTicker)
+      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'watchlist', watchlistRows, freshByTicker, suppressedFlagsByTicker, finnhubKey),
+      runScoreMonitor(serviceRoleKey, SUPABASE_URL, 'portfolio_holdings', portfolioRows, freshByTicker, suppressedFlagsByTicker, finnhubKey)
     ]);
     scoreChanges = {
       checked: watchlistScoreChanges.checked + portfolioScoreChanges.checked,
