@@ -4,8 +4,8 @@ import { callGroqForJson } from '../lib/groqHelpers.js';
 import { checkAndIncrementIpRateLimit, getClientIp } from '../lib/rateLimit.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
-const IP_RATE_LIMIT_MAX_REQUESTS = 10; // per hour, per IP — same LLM cost tier as analyze.js,
-                                       // called once per comparison
+const IP_RATE_LIMIT_MAX_REQUESTS = 30; // per hour, per IP — same LLM cost tier as analyze.js,
+                                        // called once per comparison
 
 const WINNERS = ['a', 'b', 'tie'];
 const FILLER_REASON = 'See the metrics above for further detail.';
