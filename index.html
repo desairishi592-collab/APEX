@@ -1178,6 +1178,20 @@
 
     <div class="dive-card">
       <div class="dive-body">
+        <div class="section-title">Your watch conditions</div>
+        <p style="font-size:12px; color:var(--muted); line-height:1.5; margin-bottom:12px;">
+          Custom thresholds you've set on individual holdings — checked daily alongside the
+          automatic score/red-flag monitoring above. To add one, open a stock's scan report, tap
+          the chat button, then "Set a watch condition."
+        </p>
+        <div id="watch-conditions-list">
+          <div class="history-loading">Loading watch conditions…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dive-card">
+      <div class="dive-body">
         <div class="section-title">Recent alerts</div>
         <div id="agent-alerts-list">
           <div class="history-loading">Loading alerts…</div>
@@ -1256,6 +1270,20 @@
   let bonusScans = 0;
   let referralCode = null;
   let referralCount = 0;
+
+  // Shared by loadWatchConditions() (Agent page, this script block) and the chat widget's watch-
+  // condition wizard (later script block) — declared once here so both reference the same
+  // constant. Kept in sync with WATCH_CONDITION_METRICS in lib/watchConditions.js (the static
+  // frontend can't import that module directly).
+  const WATCH_CONDITION_METRICS = {
+    score: { label: 'APEX Score', unit: '/100', placeholder: 'e.g. 60' },
+    pe_ratio: { label: 'P/E Ratio', unit: '', placeholder: 'e.g. 35' },
+    debt_equity: { label: 'Debt/Equity', unit: '', placeholder: 'e.g. 1.5' },
+    current_ratio: { label: 'Current Ratio', unit: '', placeholder: 'e.g. 1.0' },
+    roe: { label: 'ROE', unit: '%', placeholder: 'e.g. 15' },
+    profit_margin: { label: 'Profit Margin', unit: '%', placeholder: 'e.g. 10' },
+    safety_score: { label: 'Stock Safety Score', unit: '/100', placeholder: 'e.g. 50' }
+  };
 
   // ── REFERRALS ──
   const REFERRAL_STORAGE_KEY = 'apex_referral';
@@ -2331,12 +2359,14 @@
     if (!currentUser) { openAuth('login'); return; }
     show('s-agent');
     loadAgentAlerts();
+    loadWatchConditions();
   }
 
   // APEX Agent's own feed — same `notifications` table the bell panel reads (loadNotifications
   // above), just scoped to the types the Agent's own monitoring/digest crons create:
   // 'score_change', 'red_flag', 'earnings_upcoming', and 'concentration_risk' from the daily
   // monitoring cron (lib/scoreMonitor.js, lib/concentrationMonitor.js, api/check-market-alerts.js),
+  // 'watch_condition' from that same cron's user-defined threshold checks (lib/watchConditions.js),
   // and 'weekly_digest' from the weekly unprompted portfolio digest (lib/portfolioDigest.js, wired
   // into api/weekly-digest.js) — a proactive summary generated on a schedule, not a reaction to a
   // triggered threshold. Price alerts and watchlist-move notifications still show in the general
@@ -2355,7 +2385,7 @@
         .from('notifications')
         .select('id, type, ticker, company_name, title, body, read, created_at')
         .eq('user_id', currentUser.id)
-        .in('type', ['score_change', 'red_flag', 'red_flag_pattern', 'weekly_digest', 'earnings_upcoming', 'concentration_risk'])
+        .in('type', ['score_change', 'red_flag', 'red_flag_pattern', 'weekly_digest', 'earnings_upcoming', 'concentration_risk', 'watch_condition'])
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
@@ -2370,7 +2400,7 @@
         const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
         const title = escapeHtml(n.title);
         const body = escapeHtml(n.body);
-        const stripeColor = n.type === 'red_flag' || n.type === 'red_flag_pattern' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : 'var(--accent-2)';
+        const stripeColor = n.type === 'red_flag' || n.type === 'red_flag_pattern' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : n.type === 'watch_condition' ? 'var(--accent)' : 'var(--accent-2)';
         const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
         return `
           <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">
@@ -2384,6 +2414,136 @@
       await markVisibleNotificationsRead(rows);
     } catch (e) {
       listEl.innerHTML = '<div class="history-empty">Couldn\'t load your alerts. Please try again.</div>';
+    }
+  }
+
+  // ── WATCH CONDITIONS: view/edit/delete ──
+  // Creation happens via the chat widget's wizard (startWatchConditionWizard(), later script
+  // block), grounded in whatever stock scan is currently open — this section is purely for
+  // managing conditions already saved. Cached after each load so edit/delete handlers (triggered
+  // from onclick="" attributes, which can only pass primitives like the row id) can look up the
+  // rest of a row's data without a re-fetch.
+  let watchConditionRowsCache = [];
+
+  function formatWatchConditionValue(metric, value) {
+    if (value == null) return '';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return String(value);
+    if (metric === 'score' || metric === 'safety_score') return String(Math.round(n));
+    if (metric === 'debt_equity' || metric === 'current_ratio') return n.toFixed(2);
+    return n.toFixed(1);
+  }
+
+  async function loadWatchConditions() {
+    const listEl = document.getElementById('watch-conditions-list');
+    listEl.innerHTML = '<div class="history-loading">Loading watch conditions…</div>';
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your watch conditions.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('watch_conditions')
+        .select('id, ticker, company_name, metric, operator, threshold, active, triggered_at, triggered_value, created_at')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+
+      watchConditionRowsCache = data || [];
+      if (!watchConditionRowsCache.length) {
+        listEl.innerHTML = '<div class="history-empty">No watch conditions yet — open a stock\'s scan report, tap the chat button, then "Set a watch condition."</div>';
+        return;
+      }
+
+      listEl.innerHTML = watchConditionRowsCache.map(renderWatchConditionRow).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your watch conditions. Please try again.</div>';
+    }
+  }
+
+  function renderWatchConditionRow(row) {
+    const def = WATCH_CONDITION_METRICS[row.metric] || { label: row.metric, unit: '' };
+    const statusLabel = row.triggered_at ? 'Triggered' : row.active ? 'Active' : 'Paused';
+    const statusClass = row.triggered_at ? 'buy' : row.active ? 'hold' : 'nodata';
+    const date = new Date(row.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const ticker = escapeHtml(row.ticker || '');
+    const companyName = escapeHtml(row.company_name || row.ticker || '');
+    const summary = escapeHtml(`${def.label} ${row.operator} ${row.threshold}${def.unit}`);
+    const triggeredNote = row.triggered_at
+      ? ` · triggered at ${formatWatchConditionValue(row.metric, row.triggered_value)}${def.unit} on ${new Date(row.triggered_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      : '';
+    return `
+      <div class="history-item" id="wc-row-${row.id}" style="cursor:default; flex-direction:column; align-items:stretch; gap:6px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <div class="history-info">
+            <div class="history-biz">${ticker} — ${summary}</div>
+            <div class="history-meta">${companyName} · set ${date}${triggeredNote}</div>
+          </div>
+          <span class="signal-badge ${statusClass}">${statusLabel}</span>
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="auth-close" style="position:static; font-size:12px; padding:4px 10px; border:1px solid var(--border); border-radius:14px;" onclick="startWatchConditionEdit('${row.id}')">Edit</button>
+          <button class="auth-close" style="position:static; font-size:12px; padding:4px 10px; border:1px solid var(--border); border-radius:14px;" onclick="deleteWatchCondition('${row.id}')" title="Delete">✕</button>
+        </div>
+      </div>`;
+  }
+
+  function startWatchConditionEdit(id) {
+    const row = watchConditionRowsCache.find(r => r.id === id);
+    const rowEl = document.getElementById(`wc-row-${id}`);
+    if (!row || !rowEl) return;
+    const def = WATCH_CONDITION_METRICS[row.metric] || { label: row.metric, unit: '' };
+
+    rowEl.innerHTML = `
+      <div style="font-size:12px; color:var(--muted);">${escapeHtml(row.ticker)} — ${escapeHtml(def.label)}</div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <select id="wc-edit-operator-${id}" style="background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; color:var(--text);">
+          <option value="above" ${row.operator === 'above' ? 'selected' : ''}>Above</option>
+          <option value="below" ${row.operator === 'below' ? 'selected' : ''}>Below</option>
+        </select>
+        <input id="wc-edit-threshold-${id}" type="number" step="any" value="${escapeHtml(String(row.threshold))}" style="flex:1; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font-size:12px; color:var(--text); box-sizing:border-box;" />
+      </div>
+      <div id="wc-edit-err-${id}" style="font-size:11px; color:#c92b25; display:none;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button class="auth-close" style="position:static; font-size:12px; padding:4px 10px; border:1px solid var(--border); border-radius:14px;" onclick="loadWatchConditions()">Cancel</button>
+        <button class="btn btn-accent" style="padding:5px 12px; font-size:12px;" onclick="saveWatchConditionEdit('${id}')">Save</button>
+      </div>`;
+  }
+
+  // Editing re-arms a triggered condition (active=true, triggered_at/triggered_value cleared) —
+  // same "propose, don't act" spirit as creation: changing the threshold means the user wants to
+  // keep watching, not that the old trigger should still count.
+  async function saveWatchConditionEdit(id) {
+    const operator = document.getElementById(`wc-edit-operator-${id}`).value;
+    const threshold = parseFloat(document.getElementById(`wc-edit-threshold-${id}`).value);
+    const errEl = document.getElementById(`wc-edit-err-${id}`);
+    if (!Number.isFinite(threshold)) {
+      errEl.textContent = 'Enter a valid number.';
+      errEl.style.display = 'block';
+      return;
+    }
+    try {
+      const { error } = await sb.from('watch_conditions')
+        .update({ operator, threshold, active: true, triggered_at: null, triggered_value: null })
+        .eq('id', id)
+        .eq('user_id', currentUser.id);
+      if (error) throw error;
+      loadWatchConditions();
+    } catch (e) {
+      errEl.textContent = 'Could not save — please try again.';
+      errEl.style.display = 'block';
+    }
+  }
+
+  async function deleteWatchCondition(id) {
+    if (!currentUser) return;
+    try {
+      await sb.from('watch_conditions').delete().eq('id', id).eq('user_id', currentUser.id);
+      loadWatchConditions();
+    } catch (e) {
+      // Non-fatal: leave the list as-is, user can retry
     }
   }
 
@@ -4719,6 +4879,10 @@
   <div style="padding:0.5rem 1rem 0; border-top:1px solid var(--border); display:flex; gap:6px; flex-wrap:wrap; background:var(--surface);">
     <button onclick="requestChatDraft('advisor_question')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Draft question for advisor</button>
     <button onclick="requestChatDraft('research_note')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Draft research note</button>
+    <!-- STOCK SCANS ONLY: opens the deterministic watch-condition wizard below — hidden/shown by
+         showChatWidget()/openPortfolioChat() since the underlying metrics (P/E, ROE, etc.) only
+         exist for public-stock scans. -->
+    <button id="chat-watch-condition-btn" onclick="startWatchConditionWizard()" style="display:none; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Set a watch condition</button>
   </div>
   <!-- Input -->
   <div style="padding:0.75rem 1rem; display:flex; gap:8px; background:var(--surface);">
@@ -4762,10 +4926,16 @@
     chatScanData = data;
     chatBizName = bizName;
     chatMode = mode;
+    resetWatchConditionWizard();
     const messages = document.getElementById('chat-messages');
     messages.innerHTML = '';
     addChatMessage(`Hey! I just finished analyzing **${bizName}** — scored ${data.score}/100, ${data.status}. Got any questions? I can tell you if it's worth investing in, how many shares you could get with your budget, when to think about selling — anything based on what I just found.`, 'ai');
     revealChatFab();
+    // Watch conditions are only meaningful for public-stock scans (P/E, ROE, debt/equity, etc.
+    // don't exist for a private-business owner/investor scan, and there's no ticker for the daily
+    // cron to track).
+    const watchBtn = document.getElementById('chat-watch-condition-btn');
+    if (watchBtn) watchBtn.style.display = data.isPublicStock ? '' : 'none';
   }
 
   // APEX Agent: opens the same chat widget with no specific scan behind it — for "how's my
@@ -4777,10 +4947,13 @@
     chatScanData = null;
     chatBizName = 'your portfolio';
     chatMode = 'portfolio';
+    resetWatchConditionWizard();
     const messages = document.getElementById('chat-messages');
     messages.innerHTML = '';
     addChatMessage(`Hey! Ask me anything about your watchlist or portfolio — how it's doing, what's changed recently, or general strategy questions. I'll factor in what you've already got.`, 'ai');
     revealChatFab();
+    const watchBtn = document.getElementById('chat-watch-condition-btn');
+    if (watchBtn) watchBtn.style.display = 'none'; // no single ticker in this mode
     if (!chatOpen) toggleChat();
   }
 
@@ -4998,6 +5171,183 @@
 
     messages.appendChild(wrap);
     messages.scrollTop = messages.scrollHeight;
+  }
+
+  // ── WATCH CONDITIONS: "propose, don't act" setup wizard ──
+  // Deliberately NOT routed through Groq like the rest of the chat widget — this ends in an
+  // INSERT with a real numeric threshold that the daily cron (api/check-market-alerts.js) acts on
+  // unattended, so getting the metric/operator/number exactly right matters more here than
+  // anywhere else in the chat UI. A quick-reply wizard (this) is fully deterministic — no risk of
+  // an LLM mis-parsing "35" out of a sentence — while still being a sequence of questions inside
+  // the chat panel rather than one static form, in the same "propose, don't act" spirit as the
+  // draft-question feature above: nothing is saved until the user hits "Confirm & save" on the
+  // exact condition shown back to them. WATCH_CONDITION_METRICS itself is declared once, near the
+  // top of the first script block, shared with loadWatchConditions() on the Agent page.
+
+  let watchConditionWizard = null; // { step, ticker, companyName, metric, operator, threshold, blockEl }
+
+  function resetWatchConditionWizard() {
+    if (watchConditionWizard?.blockEl) watchConditionWizard.blockEl.remove();
+    watchConditionWizard = null;
+  }
+
+  // Not logged in has no resume-after-login step (unlike savePriceAlert's pendingPriceAlertSave) —
+  // scoped out for this first pass; the user just clicks the button again after logging in.
+  function startWatchConditionWizard() {
+    if (!currentUser) { openAuth('signup'); return; }
+    if (!chatScanData?.isPublicStock || !currentStockTicker) return;
+    resetWatchConditionWizard();
+
+    const messages = document.getElementById('chat-messages');
+    const blockEl = document.createElement('div');
+    blockEl.style.cssText = 'align-self:stretch; border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:var(--surface); display:flex; flex-direction:column; gap:8px;';
+    messages.appendChild(blockEl);
+
+    watchConditionWizard = {
+      step: 'metric',
+      ticker: currentStockTicker,
+      companyName: chatBizName || currentStockTicker,
+      metric: null, operator: null, threshold: null,
+      blockEl
+    };
+    renderWatchConditionStep();
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  // Re-renders the wizard's single block in place for whatever step it's currently on — one
+  // persistent block that gets its contents replaced each step, rather than stacking a new block
+  // per question, so there's never more than one live set of controls to interact with.
+  function renderWatchConditionStep() {
+    const w = watchConditionWizard;
+    if (!w) return;
+    w.blockEl.innerHTML = '';
+
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:10px; font-weight:700; letter-spacing:0.4px; color:var(--accent); text-transform:uppercase;';
+    label.textContent = 'Set a watch condition';
+    w.blockEl.appendChild(label);
+
+    const prompt = document.createElement('div');
+    prompt.style.cssText = 'font-size:13px; color:var(--text); line-height:1.5;';
+    w.blockEl.appendChild(prompt);
+
+    const pill = (text, onClick) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = text;
+      btn.style.cssText = 'background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:12px; color:var(--text); cursor:pointer;';
+      btn.onclick = onClick;
+      return btn;
+    };
+
+    if (w.step === 'metric') {
+      prompt.textContent = `Which metric would you like to watch on ${w.ticker}?`;
+      const pillRow = document.createElement('div');
+      pillRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+      Object.entries(WATCH_CONDITION_METRICS).forEach(([key, def]) => {
+        pillRow.appendChild(pill(def.label, () => { w.metric = key; w.step = 'operator'; renderWatchConditionStep(); }));
+      });
+      w.blockEl.appendChild(pillRow);
+    } else if (w.step === 'operator') {
+      const def = WATCH_CONDITION_METRICS[w.metric];
+      prompt.textContent = `Alert you if ${def.label} for ${w.ticker} goes:`;
+      const pillRow = document.createElement('div');
+      pillRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px;';
+      pillRow.appendChild(pill('Above a threshold', () => { w.operator = 'above'; w.step = 'threshold'; renderWatchConditionStep(); }));
+      pillRow.appendChild(pill('Below a threshold', () => { w.operator = 'below'; w.step = 'threshold'; renderWatchConditionStep(); }));
+      w.blockEl.appendChild(pillRow);
+    } else if (w.step === 'threshold') {
+      const def = WATCH_CONDITION_METRICS[w.metric];
+      prompt.textContent = `What threshold value for ${def.label}?`;
+
+      const inputRow = document.createElement('div');
+      inputRow.style.cssText = 'display:flex; gap:6px;';
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = 'any';
+      input.placeholder = def.placeholder;
+      input.style.cssText = 'flex:1; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px; color:var(--text); outline:none; box-sizing:border-box;';
+      const goBtn = document.createElement('button');
+      goBtn.type = 'button';
+      goBtn.textContent = 'Next';
+      goBtn.style.cssText = 'background:var(--accent); color:var(--text); border:none; border-radius:8px; padding:7px 14px; font-size:12px; cursor:pointer; font-weight:600;';
+      const err = document.createElement('div');
+      err.style.cssText = 'font-size:11px; color:#c92b25; display:none;';
+      goBtn.onclick = () => {
+        const val = parseFloat(input.value);
+        if (!Number.isFinite(val)) {
+          err.textContent = 'Enter a valid number.';
+          err.style.display = 'block';
+          return;
+        }
+        w.threshold = val;
+        w.step = 'confirm';
+        renderWatchConditionStep();
+      };
+      input.onkeydown = (e) => { if (e.key === 'Enter') goBtn.click(); };
+      inputRow.appendChild(input);
+      inputRow.appendChild(goBtn);
+      w.blockEl.appendChild(inputRow);
+      w.blockEl.appendChild(err);
+      setTimeout(() => input.focus(), 0);
+    } else if (w.step === 'confirm') {
+      const def = WATCH_CONDITION_METRICS[w.metric];
+      prompt.textContent = `Alert me if ${w.ticker}'s ${def.label} goes ${w.operator} ${w.threshold}${def.unit}?`;
+
+      const actionsRow = document.createElement('div');
+      actionsRow.style.cssText = 'display:flex; gap:8px; justify-content:flex-end;';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.cssText = 'background:none; border:1px solid var(--border); border-radius:14px; padding:6px 14px; font-size:12px; color:var(--text); cursor:pointer;';
+      cancelBtn.onclick = cancelWatchConditionWizard;
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = 'Confirm & save';
+      confirmBtn.style.cssText = 'background:var(--accent); color:var(--text); border:none; border-radius:14px; padding:6px 14px; font-size:12px; cursor:pointer; font-weight:600;';
+      confirmBtn.onclick = () => confirmWatchCondition(confirmBtn);
+      actionsRow.appendChild(cancelBtn);
+      actionsRow.appendChild(confirmBtn);
+      w.blockEl.appendChild(actionsRow);
+
+      const hint = document.createElement('div');
+      hint.style.cssText = 'font-size:11px; color:var(--muted);';
+      hint.textContent = 'Informational only — APEX checks this daily and notifies you if it\'s met. It never places trades or takes action for you.';
+      w.blockEl.appendChild(hint);
+    }
+
+    document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+  }
+
+  function cancelWatchConditionWizard() {
+    resetWatchConditionWizard();
+    addChatMessage('No problem — let me know if you\'d like to set a different watch condition.', 'ai');
+  }
+
+  async function confirmWatchCondition(confirmBtn) {
+    const w = watchConditionWizard;
+    if (!w || !currentUser) return;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Saving…';
+    try {
+      const { error } = await sb.from('watch_conditions').insert({
+        user_id: currentUser.id,
+        ticker: w.ticker,
+        company_name: w.companyName,
+        metric: w.metric,
+        operator: w.operator,
+        threshold: w.threshold
+      });
+      if (error) throw error;
+
+      const def = WATCH_CONDITION_METRICS[w.metric];
+      resetWatchConditionWizard();
+      addChatMessage(`✓ Watch condition set — I'll check ${w.ticker}'s ${def.label} daily and let you know if it goes ${w.operator} ${w.threshold}${def.unit}.`, 'ai');
+    } catch (e) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Confirm & save';
+      addChatMessage('Something went wrong saving that — please try again.', 'ai');
+    }
   }
 
   // ── PWA: service worker registration + install banner ──

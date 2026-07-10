@@ -7,6 +7,7 @@ import { recordScoreSnapshots } from '../lib/scoreHistory.js';
 import { fetchNextEarningsDate, earningsSessionLabel } from '../lib/earnings.js';
 import { runConcentrationMonitor } from '../lib/concentrationMonitor.js';
 import { runCrossHoldingFlagMonitor } from '../lib/crossHoldingFlags.js';
+import { runWatchConditionMonitor } from '../lib/watchConditions.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const WATCHLIST_MOVE_THRESHOLD_PCT = 5;
@@ -208,7 +209,10 @@ async function checkUpcomingEarnings(serviceRoleKey, earningsByTicker, rows) {
 // calendar check further below shares one batched Finnhub calendar/earnings fetch the same way;
 // the sector concentration check further below reuses that same re-scan's sectorBenchmark.sector
 // field, with no fetch of its own at all; the cross-holding red-flag pattern check reuses that
-// same re-scan's redFlags, also with no fetch of its own.
+// same re-scan's redFlags, also with no fetch of its own; the user-defined watch condition check
+// further below reuses that same re-scan's score/rawMetrics/stockAnalysis fields, also with no
+// fetch of its own — its tickers are folded into the shared re-scan set above so a condition on a
+// ticker outside the user's watchlist/portfolio still gets evaluated.
 export default async function handler(req) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get('authorization');
@@ -230,9 +234,9 @@ export default async function handler(req) {
 
   // Full rows fetched once here (rather than inside each check function) so the new score/red-flag
   // monitoring below can reuse the same watchlist/portfolio rows without a second query.
-  let alertRows, watchlistRows, portfolioRows;
+  let alertRows, watchlistRows, portfolioRows, watchConditionRows;
   try {
-    [alertRows, watchlistRows, portfolioRows] = await Promise.all([
+    [alertRows, watchlistRows, portfolioRows, watchConditionRows] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/price_alerts?select=*&status=eq.active`, {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
       }).then(r => r.ok ? r.json() : []),
@@ -240,6 +244,9 @@ export default async function handler(req) {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
       }).then(r => r.ok ? r.json() : []),
       fetch(`${SUPABASE_URL}/rest/v1/portfolio_holdings?select=user_id,ticker,company_name,score,safety_score,signal`, {
+        headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
+      }).then(r => r.ok ? r.json() : []),
+      fetch(`${SUPABASE_URL}/rest/v1/watch_conditions?select=*&active=eq.true`, {
         headers: { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}` }
       }).then(r => r.ok ? r.json() : [])
     ]);
@@ -270,12 +277,15 @@ export default async function handler(req) {
   const freshByTicker = {};
   try {
     const origin = new URL(req.url).origin;
-    const uniqueTickers = [...new Set([...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker)])]
+    // Includes watch_conditions' own tickers (not just watchlist/portfolio) so a condition set on
+    // a ticker the user isn't otherwise tracking still gets fresh data to evaluate against below —
+    // see runWatchConditionMonitor further down, which reuses this same freshByTicker map.
+    const uniqueTickers = [...new Set([...watchlistRows.map(r => r.ticker), ...portfolioRows.map(r => r.ticker), ...watchConditionRows.map(r => r.ticker)])]
       .slice(0, MAX_TICKERS_PER_RESCAN_RUN);
 
     const companyNameByTicker = {};
     await Promise.all(uniqueTickers.map(async (ticker) => {
-      const sourceRow = watchlistRows.find(r => r.ticker === ticker) || portfolioRows.find(r => r.ticker === ticker);
+      const sourceRow = watchlistRows.find(r => r.ticker === ticker) || portfolioRows.find(r => r.ticker === ticker) || watchConditionRows.find(r => r.ticker === ticker);
       companyNameByTicker[ticker] = sourceRow?.company_name ?? null;
       const fresh = await fetchFreshAnalysis(origin, ticker, sourceRow?.company_name);
       if (fresh) freshByTicker[ticker] = fresh;
@@ -355,7 +365,19 @@ export default async function handler(req) {
     concentrationRisk = { checked: 0, notified: 0, error: 'Concentration monitoring failed' };
   }
 
-  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, crossHoldingPatterns, upcomingEarnings, concentrationRisk }), {
+  // User-defined watch conditions: reuses freshByTicker (populated above — its uniqueTickers
+  // computation already includes watch_conditions' own tickers, see that comment) rather than a
+  // new fetch. Isolated in its own try/catch so a failure here can't take down anything else that
+  // already succeeded this run.
+  let watchConditions = { checked: 0, triggered: 0, notified: 0 };
+  try {
+    watchConditions = await runWatchConditionMonitor(serviceRoleKey, watchConditionRows, freshByTicker);
+  } catch (e) {
+    console.error('Watch condition monitoring failed:', e.message);
+    watchConditions = { checked: 0, triggered: 0, notified: 0, error: 'Watch condition monitoring failed' };
+  }
+
+  return new Response(JSON.stringify({ priceAlerts, watchlistMoves, scoreChanges, scoreHistory, crossHoldingPatterns, upcomingEarnings, concentrationRisk, watchConditions }), {
     status: 200, headers: { 'Content-Type': 'application/json' }
   });
 }
