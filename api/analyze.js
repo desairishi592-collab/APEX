@@ -8,7 +8,7 @@ import { resolveSector } from '../lib/sectorBenchmarks.js';
 import { decideScanTimeConcentrationNudge } from '../lib/concentrationMonitor.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
-const IP_RATE_LIMIT_MAX_REQUESTS = 10; // per hour, per IP — this endpoint has no auth requirement
+const IP_RATE_LIMIT_MAX_REQUESTS = 30; // per hour, per IP — this endpoint has no auth requirement
                                         // (guest scanning is a deliberate product feature), so IP-based
                                         // limiting is the only practical guard against automated abuse
                                         // of the shared Groq/Finnhub quota.

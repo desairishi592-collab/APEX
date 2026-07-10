@@ -5,9 +5,9 @@ import { getCachedPeerScan, setCachedPeerScan } from '../lib/peerCache.js';
 import { checkAndIncrementIpRateLimit, getClientIp } from '../lib/rateLimit.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
-// Lower than /api/analyze's 10/hour: a single call here can trigger up to 4 full Groq+Finnhub
+// Lower than /api/analyze's 30/hour: a single call here can trigger up to 4 full Groq+Finnhub
 // scans on a cold cache (one per peer), so the worst-case cost per request is much higher.
-const IP_RATE_LIMIT_MAX_REQUESTS = 5;
+const IP_RATE_LIMIT_MAX_REQUESTS = 15;
 const MAX_PEERS_PER_REQUEST = 4; // matches fetchCompetitors()'s own cap in lib/stockAnalysis.js
 
 // Runs handleStockAnalysis directly (in-process), same as api/analyze.js already does — this is
