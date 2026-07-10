@@ -3,12 +3,104 @@ export const config = { runtime: 'edge' };
 import { callGroqForJson, clampIndustryPercentiles, sanitizeRiskTimeline } from '../lib/groqHelpers.js';
 import { handleStockAnalysis } from '../lib/stockAnalysis.js';
 import { checkAndIncrementIpRateLimit, getClientIp } from '../lib/rateLimit.js';
+import { getUserFromSessionToken, getBearerToken, SUPABASE_ANON_KEY } from '../lib/supabaseAuth.js';
+import { resolveSector } from '../lib/sectorBenchmarks.js';
+import { decideScanTimeConcentrationNudge } from '../lib/concentrationMonitor.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const IP_RATE_LIMIT_MAX_REQUESTS = 10; // per hour, per IP — this endpoint has no auth requirement
                                         // (guest scanning is a deliberate product feature), so IP-based
                                         // limiting is the only practical guard against automated abuse
                                         // of the shared Groq/Finnhub quota.
+
+// ── SCAN-TIME PORTFOLIO CONCENTRATION NUDGE (public-stock scans only) ──
+// Surfaces "this would be your Nth <sector> holding" directly on the scan report for a logged-in
+// user scanning a ticker they don't already track — real-time counterpart to the nightly cron's
+// concentration_risk notification (lib/concentrationMonitor.js), computed here instead of only
+// there. Strictly informational, same regulatory posture as that feature: never "you should
+// diversify," just what adding this holding would mean for their sector exposure.
+
+// Fetches ONLY the logged-in user's own watchlist + portfolio tickers (not scores/sectors — RLS-
+// scoped via their own session token, same pattern as api/chat.js's fetchUserPortfolioData) so the
+// hypothetical-add check below has a baseline. No new columns, no service-role key needed.
+async function fetchHeldTickers(token) {
+  try {
+    const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` };
+    const [watchlistRes, holdingsRes] = await Promise.all([
+      fetch(`${SUPABASE_URL}/rest/v1/watchlist?select=ticker`, { headers }),
+      fetch(`${SUPABASE_URL}/rest/v1/portfolio_holdings?select=ticker`, { headers })
+    ]);
+    const watchlist = watchlistRes.ok ? await watchlistRes.json() : [];
+    const holdings = holdingsRes.ok ? await holdingsRes.json() : [];
+    return [...new Set([...watchlist, ...holdings].map(r => String(r.ticker).toUpperCase()))];
+  } catch {
+    return [];
+  }
+}
+
+// One Finnhub profile2 call per held ticker (cheap, no AI/Groq cost) to resolve its sector via the
+// same resolveSector() lookup table every scan already uses — same lightweight pattern as
+// api/weekly-digest.js's fetchSectorByTicker, just scoped to this one scan-time check instead of
+// the cron's full ticker universe. Best-effort and run in parallel with the main scan below (it
+// doesn't depend on the ticker being scanned at all), so it adds no serial latency in the common
+// case. A ticker whose industry doesn't resolve to a specific sector (resolveSector's unmatched
+// "General Market" fallback) is excluded — same reasoning as the cron's own null-sector filter:
+// an unmatched sector isn't a real concentration claim.
+async function fetchHeldTickerSectors(finnhubKey, tickers) {
+  const pairs = [];
+  await Promise.all(tickers.map(async (ticker) => {
+    try {
+      const res = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${finnhubKey}`);
+      const profile = res.ok ? await res.json() : null;
+      const industry = profile?.finnhubIndustry || profile?.gsector;
+      if (!industry) return;
+      const sector = resolveSector(industry);
+      if (sector.matched) pairs.push({ ticker, sector: sector.label });
+    } catch {
+      // Non-fatal — this ticker just doesn't contribute to the concentration check
+    }
+  }));
+  return pairs;
+}
+
+// Kicked off (not awaited) alongside handleStockAnalysis() below — entirely independent of the
+// ticker being scanned, so there's no reason to wait for the scan itself to finish first. Returns
+// null for anonymous callers or logged-in users with no existing watchlist/portfolio to compare
+// against (requirement: no nudge without real holdings to check).
+async function buildConcentrationContext(token, tickerUpper) {
+  const user = await getUserFromSessionToken(token);
+  if (!user?.id) return null;
+
+  const heldTickers = await fetchHeldTickers(token);
+  if (!heldTickers.length || heldTickers.includes(tickerUpper)) return null;
+
+  const finnhubKey = process.env.FINNHUB_API_KEY;
+  if (!finnhubKey) return null;
+
+  const existingPairs = await fetchHeldTickerSectors(finnhubKey, heldTickers);
+  return { existingPairs };
+}
+
+// Attaches parsed.concentrationNudge to a successful public-stock scan response, if warranted.
+// Only reads/reconstructs the response body when there's an actual logged-in-user context to
+// check — anonymous scans (concentrationContextPromise is null) pass through untouched.
+async function attachConcentrationNudge(response, tickerUpper, concentrationContextPromise) {
+  if (!concentrationContextPromise || response.status !== 200) return response;
+
+  const parsed = await response.json();
+  try {
+    const context = await concentrationContextPromise;
+    const sector = parsed?.sectorBenchmark;
+    if (context && sector?.matched && sector.sector) {
+      const nudge = decideScanTimeConcentrationNudge(context.existingPairs, tickerUpper, sector.sector);
+      if (nudge) parsed.concentrationNudge = nudge;
+    }
+  } catch (e) {
+    console.error('Concentration nudge computation failed:', e.message);
+  }
+
+  return new Response(JSON.stringify(parsed), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
 
 function parseMoney(value) {
   const n = parseFloat(String(value).replace(/[^0-9.-]/g, ''));
@@ -76,7 +168,13 @@ export default async function handler(req) {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      return await handleStockAnalysis(stockTicker, stockCompanyName);
+      const tickerUpper = String(stockTicker).toUpperCase();
+      const token = getBearerToken(req);
+      // Independent of the scan itself — started now so it overlaps with handleStockAnalysis
+      // below rather than adding its own serial round-trip after.
+      const concentrationContextPromise = token ? buildConcentrationContext(token, tickerUpper) : null;
+      const response = await handleStockAnalysis(stockTicker, stockCompanyName);
+      return await attachConcentrationNudge(response, tickerUpper, concentrationContextPromise);
     }
 
     // ── PRIVATE BUSINESS PATH (owner or investor evaluating a private business) ──

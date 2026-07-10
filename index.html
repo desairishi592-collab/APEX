@@ -756,6 +756,10 @@
         <!-- STOCK ONLY: next earnings date, when Finnhub has one within the lookahead window
              (lib/earnings.js) — same pill styling as the badge above, turquoise/orange system. -->
         <span class="score-badge" id="r-earnings-badge" style="display:none; margin-left:6px;"></span>
+        <!-- STOCK ONLY, LOGGED-IN: scan-time portfolio concentration nudge (api/analyze.js +
+             lib/concentrationMonitor.js) — strictly informational, e.g. "This would be your 4th
+             Technology-sector holding." Neutral styling (not a warning color) on purpose. -->
+        <div id="r-concentration-nudge" style="display:none; margin-top:10px; padding:8px 12px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); font-size:12px; color:var(--muted);"></div>
       </div>
     </div>
 
@@ -2785,9 +2789,19 @@
     });
 
     try {
+      // If logged in, send the session token so the server can check this ticker against the
+      // user's own watchlist/portfolio for the scan-time concentration nudge (api/analyze.js) —
+      // omitted entirely for guests, who get the same scan behavior as before (no nudge).
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentUser) {
+        const { data: sessionData } = await sb.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           stockTicker: ticker,
           stockCompanyName: companyName,
@@ -3931,6 +3945,20 @@
         earningsBadge.style.display = 'inline-block';
       } else {
         earningsBadge.style.display = 'none';
+      }
+    }
+
+    // STOCK ONLY, LOGGED-IN: scan-time concentration nudge (api/analyze.js) — server only sets
+    // this when the ticker isn't already tracked and adding it would create/extend a notable
+    // same-sector concentration, so absence of the field (not just a falsy message) is the signal
+    // to hide this. textContent (not innerHTML) since this is plain informational text, not markup.
+    const concentrationNudge = document.getElementById('r-concentration-nudge');
+    if (concentrationNudge) {
+      if (d.concentrationNudge && d.concentrationNudge.message) {
+        concentrationNudge.textContent = d.concentrationNudge.message;
+        concentrationNudge.style.display = 'block';
+      } else {
+        concentrationNudge.style.display = 'none';
       }
     }
 
