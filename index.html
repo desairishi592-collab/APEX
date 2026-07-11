@@ -570,7 +570,8 @@
     <div class="am-email" id="am-email">—</div>
     <div class="am-status" id="am-status">—</div>
     <div class="am-row">
-      <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:block;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
+      <!-- Pricing not ready yet — hidden via display:none in both HTML and openAccount() below rather than removed, so re-enabling later is a two-line revert. -->
+      <a class="btn-outline" style="flex:1; text-align:center; text-decoration:none; display:none;" href="https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00" target="_blank" id="am-upgrade-btn">Upgrade to Pro</a>
       <button class="btn-outline" style="flex:1;" onclick="openHistory()" id="am-history-btn">My Scan History</button>
     </div>
     <button class="btn-outline" style="width:100%; margin-top:8px;" onclick="openAlerts()" id="am-alerts-btn">My Alerts</button>
@@ -1027,8 +1028,8 @@
       <button class="btn-outline" id="export-csv-btn" onclick="exportScanCsv()">⬇ Export CSV</button>
     </div>
 
-    <!-- PRO COMING SOON -->
-    <div class="no-print" style="background: var(--card); border: 1px solid var(--accent-glow); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-bottom: 1.25rem;">
+    <!-- PRO COMING SOON — hidden via display:none, not removed, since pricing isn't ready to show yet -->
+    <div class="no-print" style="display:none; background: var(--card); border: 1px solid var(--accent-glow); border-radius: var(--radius); padding: 1.5rem; text-align: center; margin-bottom: 1.25rem;">
       <div style="font-size: 20px; margin-bottom: 8px;">🚀</div>
       <div style="font-family: var(--display); font-weight: 600; font-size: 16px; margin-bottom: 6px;">APEX Pro — Coming Soon</div>
       <div style="font-size: 13px; color: var(--muted); line-height: 1.6; max-width: 400px; margin: 0 auto;">Unlimited scans, score trend over time, PDF exports, and more. Everything you're seeing now is free during our beta — Pro unlocks even more when it launches.</div>
@@ -1650,12 +1651,11 @@
       renderAuthState();
       closeAuth();
 
-      // If they came from the landing page having picked Pro, take them straight to checkout
+      // Auto-opening Stripe checkout here (for a ?plan=pro landing-page handoff) disabled —
+      // pricing isn't ready to show yet. pendingProUpgrade is still consumed/reset below so a
+      // stale flag from an old link can't linger, it just no longer triggers a purchase.
       if (pendingProUpgrade && authMode === 'signup') {
         pendingProUpgrade = false;
-        if (!isPro) {
-          window.open('https://buy.stripe.com/test_cNi28qahAaGBdeE4wOaEE00', '_blank');
-        }
       }
 
       // If they tried to scan before they were logged in, finish that scan for them now
@@ -1721,20 +1721,11 @@
 
   function openAccount() {
     document.getElementById('am-email').textContent = currentUser.email;
-    const scansLeft = Math.max(FREE_SCAN_LIMIT - scanCount, 0);
-    let statusText;
-    if (effectiveIsPro()) {
-      statusText = isPro ? '✓ APEX Pro — unlimited scans' : '✓ Pro preview active (dev only, not billed)';
-    } else if (scansLeft > 0) {
-      statusText = `Free plan — ${scansLeft} scan${scansLeft === 1 ? '' : 's'} left`;
-    } else {
-      const remaining = waitTimeRemaining();
-      statusText = remaining
-        ? `Free plan — out of scans, ${remaining} until your next one`
-        : `Free plan — ${scansLeft} scans left`;
-    }
-    document.getElementById('am-status').textContent = statusText;
-    document.getElementById('am-upgrade-btn').style.display = isPro ? 'none' : 'block';
+    // Plan-tier status text ("Free plan — X scans left" / "APEX Pro") removed — pricing isn't
+    // ready to show yet, and it was already inaccurate during open beta anyway (checkScanAllowed
+    // unconditionally allows every scan, so there's no real cap to report a countdown against).
+    document.getElementById('am-status').textContent = 'Beta access — unlimited scans';
+    document.getElementById('am-upgrade-btn').style.display = 'none';
     document.getElementById('preview-pro-btn').textContent = previewPro ? 'On' : 'Off';
     document.getElementById('account-overlay').classList.add('active');
     document.getElementById('am-api-key-display').style.display = 'none';
