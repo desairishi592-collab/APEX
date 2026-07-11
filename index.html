@@ -545,7 +545,7 @@
     <span class="nav-logo-text">APEX</span>
   </a>
   <div class="nav-right">
-    <button class="nav-account-btn" onclick="openStandaloneComparePage()" id="nav-compare-btn">⚖ Compare</button>
+    <button class="nav-account-btn" onclick="openInvestmentsPage()" id="nav-compare-btn">Investments</button>
     <!-- PHASE 2: user accounts enabled -->
     <div class="nav-auth" id="nav-auth">
       <button class="nav-account-btn" onclick="openAuth('login')" id="btn-login">Log in</button>
@@ -1084,18 +1084,112 @@
 </div>
 
 <!-- SCREEN 4: WATCHLIST -->
-<div class="screen" id="s-watchlist">
+<!-- SCREEN: HOLDINGS — Watchlist and Portfolio nested as sub-tabs. Relocated from the former
+     separate s-watchlist / s-portfolio screens per the nav restructure — every element id and
+     onclick handler below is byte-for-byte the same as before, only the screen/tab wrapper
+     changed, so loadWatchlistPage()/loadPortfolioPage()/exportWatchlistCsv()/etc. all still work
+     unmodified. -->
+<div class="screen" id="s-holdings">
   <div class="results-wrap">
     <div class="results-header">
-      <h2>My Watchlist</h2>
+      <h2>Holdings</h2>
       <div style="display:flex; gap:8px;">
-        <button class="rescan-btn" onclick="exportWatchlistCsv()">⬇ Export CSV</button>
         <button class="rescan-btn" onclick="openPortfolioChat()">Ask APEX</button>
         <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
       </div>
     </div>
-    <div class="watchlist-page-list" id="watchlist-page-list">
-      <div class="history-loading">Loading watchlist…</div>
+
+    <div class="mode-toggle" id="holdings-tab-toggle">
+      <button class="mode-btn active" id="holdings-tab-btn-watchlist" onclick="switchHoldingsTab('watchlist')">Watchlist</button>
+      <button class="mode-btn" id="holdings-tab-btn-portfolio" onclick="switchHoldingsTab('portfolio')">Portfolio</button>
+    </div>
+
+    <!-- WATCHLIST SECTION -->
+    <div id="holdings-watchlist-section">
+      <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
+        <button class="rescan-btn" onclick="exportWatchlistCsv()">⬇ Export CSV</button>
+      </div>
+      <div class="watchlist-page-list" id="watchlist-page-list">
+        <div class="history-loading">Loading watchlist…</div>
+      </div>
+    </div>
+
+    <!-- PORTFOLIO SECTION -->
+    <div id="holdings-portfolio-section" style="display:none;">
+      <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
+        <button class="rescan-btn" onclick="exportPortfolioCsv()">⬇ Export CSV</button>
+      </div>
+
+      <div class="portfolio-summary-row">
+        <div class="portfolio-summary-card">
+          <div class="score-card" style="border:none; background:none; padding:0;">
+            <div class="score-ring-wrap">
+              <canvas id="portfolio-score-canvas" width="96" height="96"></canvas>
+              <div class="score-center">
+                <span class="score-num" id="portfolio-agg-score">—</span>
+                <span class="score-denom">/100</span>
+              </div>
+            </div>
+            <div class="score-detail">
+              <h3>Portfolio Health Score</h3>
+              <p style="font-size:12px; color:var(--muted);" id="portfolio-health-explanation">Loading…</p>
+            </div>
+          </div>
+        </div>
+        <div class="portfolio-summary-card">
+          <div class="section-title">Red flag exposure</div>
+          <div id="portfolio-redflag-total" style="font-size:20px; font-weight:600;">—</div>
+          <div class="portfolio-redflag-list" id="portfolio-redflag-breakdown"></div>
+        </div>
+      </div>
+
+      <!-- Sector breakdown across combined watchlist + portfolio — informational only, a pattern a
+           human wouldn't easily piece together by eyeballing separate stock reports one at a time.
+           Separate from the Portfolio Health Score above (portfolio-only, one weighted input into a
+           composite number) — this is the full breakdown, always shown, watchlist+portfolio combined. -->
+      <div class="dive-card" id="portfolio-sector-card" style="display:none;">
+        <div class="dive-body">
+          <div class="section-title">Sector breakdown</div>
+          <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">Across your combined watchlist and portfolio.</p>
+          <div id="portfolio-sector-rows"></div>
+        </div>
+      </div>
+
+      <div class="dive-card">
+        <div class="dive-body">
+          <div class="section-title">AI portfolio verdict</div>
+          <p id="portfolio-verdict-text" style="font-size:13px; color:var(--text); line-height:1.6;">Loading…</p>
+        </div>
+      </div>
+
+      <div class="dive-card">
+        <div class="dive-body">
+          <div class="section-title">Your positions</div>
+          <div id="portfolio-holdings-list">
+            <div class="history-loading">Loading portfolio…</div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn-outline" id="add-holding-cta-btn" style="width:100%; margin-bottom:1.25rem;" onclick="showAddHoldingForm()">+ Add holding</button>
+      <div class="dive-card" id="add-holding-form-area" style="display:none;">
+        <div class="dive-body">
+          <div class="section-title">Add a holding</div>
+          <div class="search-wrap" style="margin-bottom:10px;">
+            <input type="text" id="portfolio-add-ticker" placeholder="Search company or ticker (e.g. Apple or AAPL)" autocomplete="off" oninput="onStockSearchInput(this.value, 'portfolio-add', 'portfolio-add-dropdown')" onfocus="onStockSearchInput(this.value, 'portfolio-add', 'portfolio-add-dropdown')" />
+            <div class="search-dropdown" id="portfolio-add-dropdown" style="display:none;"></div>
+          </div>
+          <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
+            <input type="number" id="portfolio-add-shares" placeholder="Shares" step="0.0001" min="0" />
+            <input type="number" id="portfolio-add-price" placeholder="Purchase price ($)" step="0.01" min="0" />
+          </div>
+          <div class="action-row">
+            <button class="btn-outline" onclick="hideAddHoldingForm()">Cancel</button>
+            <button class="btn btn-accent" style="flex:1;" onclick="saveHolding()">Save holding</button>
+          </div>
+          <div class="err" id="add-holding-err" style="display:none; margin-top:10px;"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1109,91 +1203,6 @@
     </div>
     <div id="news-page-list">
       <div class="history-loading">Loading news…</div>
-    </div>
-  </div>
-</div>
-
-<!-- SCREEN 6: PORTFOLIO HEALTH DASHBOARD -->
-<div class="screen" id="s-portfolio">
-  <div class="results-wrap">
-    <div class="results-header">
-      <h2>Portfolio Health</h2>
-      <div style="display:flex; gap:8px;">
-        <button class="rescan-btn" onclick="exportPortfolioCsv()">⬇ Export CSV</button>
-        <button class="rescan-btn" onclick="openPortfolioChat()">Ask APEX</button>
-        <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
-      </div>
-    </div>
-
-    <div class="portfolio-summary-row">
-      <div class="portfolio-summary-card">
-        <div class="score-card" style="border:none; background:none; padding:0;">
-          <div class="score-ring-wrap">
-            <canvas id="portfolio-score-canvas" width="96" height="96"></canvas>
-            <div class="score-center">
-              <span class="score-num" id="portfolio-agg-score">—</span>
-              <span class="score-denom">/100</span>
-            </div>
-          </div>
-          <div class="score-detail">
-            <h3>Portfolio Health Score</h3>
-            <p style="font-size:12px; color:var(--muted);" id="portfolio-health-explanation">Loading…</p>
-          </div>
-        </div>
-      </div>
-      <div class="portfolio-summary-card">
-        <div class="section-title">Red flag exposure</div>
-        <div id="portfolio-redflag-total" style="font-size:20px; font-weight:600;">—</div>
-        <div class="portfolio-redflag-list" id="portfolio-redflag-breakdown"></div>
-      </div>
-    </div>
-
-    <!-- Sector breakdown across combined watchlist + portfolio — informational only, a pattern a
-         human wouldn't easily piece together by eyeballing separate stock reports one at a time.
-         Separate from the Portfolio Health Score above (portfolio-only, one weighted input into a
-         composite number) — this is the full breakdown, always shown, watchlist+portfolio combined. -->
-    <div class="dive-card" id="portfolio-sector-card" style="display:none;">
-      <div class="dive-body">
-        <div class="section-title">Sector breakdown</div>
-        <p style="font-size:12px; color:var(--muted); margin:-6px 0 12px;">Across your combined watchlist and portfolio.</p>
-        <div id="portfolio-sector-rows"></div>
-      </div>
-    </div>
-
-    <div class="dive-card">
-      <div class="dive-body">
-        <div class="section-title">AI portfolio verdict</div>
-        <p id="portfolio-verdict-text" style="font-size:13px; color:var(--text); line-height:1.6;">Loading…</p>
-      </div>
-    </div>
-
-    <div class="dive-card">
-      <div class="dive-body">
-        <div class="section-title">Holdings</div>
-        <div id="portfolio-holdings-list">
-          <div class="history-loading">Loading portfolio…</div>
-        </div>
-      </div>
-    </div>
-
-    <button class="btn-outline" id="add-holding-cta-btn" style="width:100%; margin-bottom:1.25rem;" onclick="showAddHoldingForm()">+ Add holding</button>
-    <div class="dive-card" id="add-holding-form-area" style="display:none;">
-      <div class="dive-body">
-        <div class="section-title">Add a holding</div>
-        <div class="search-wrap" style="margin-bottom:10px;">
-          <input type="text" id="portfolio-add-ticker" placeholder="Search company or ticker (e.g. Apple or AAPL)" autocomplete="off" oninput="onStockSearchInput(this.value, 'portfolio-add', 'portfolio-add-dropdown')" onfocus="onStockSearchInput(this.value, 'portfolio-add', 'portfolio-add-dropdown')" />
-          <div class="search-dropdown" id="portfolio-add-dropdown" style="display:none;"></div>
-        </div>
-        <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
-          <input type="number" id="portfolio-add-shares" placeholder="Shares" step="0.0001" min="0" />
-          <input type="number" id="portfolio-add-price" placeholder="Purchase price ($)" step="0.01" min="0" />
-        </div>
-        <div class="action-row">
-          <button class="btn-outline" onclick="hideAddHoldingForm()">Cancel</button>
-          <button class="btn btn-accent" style="flex:1;" onclick="saveHolding()">Save holding</button>
-        </div>
-        <div class="err" id="add-holding-err" style="display:none; margin-top:10px;"></div>
-      </div>
     </div>
   </div>
 </div>
@@ -1248,14 +1257,17 @@
   </div>
 </div>
 
-<!-- SCREEN 8: STANDALONE COMPARE -->
-<div class="screen" id="s-compare">
+<!-- SCREEN: INVESTMENTS — Compare nested as a section. Relocated from the former standalone
+     s-compare screen per the nav restructure — every element id and onclick handler below is
+     byte-for-byte the same as before, only the screen wrapper changed. -->
+<div class="screen" id="s-investments">
   <div class="results-wrap">
     <div class="results-header">
-      <h2>Compare Companies</h2>
+      <h2>Investments</h2>
       <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
     </div>
 
+    <div class="section-title">Compare Companies</div>
     <div class="dive-card" id="standalone-compare-form-card">
       <div class="dive-body">
         <div class="biz-grid" style="grid-template-columns: 1fr 1fr;">
@@ -1573,9 +1585,8 @@
     const navAuth = document.getElementById('nav-auth');
     if (currentUser) {
       navAuth.innerHTML = `
-        <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">🔔<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
-        <button class="nav-account-btn" onclick="openWatchlistPage()">☆ Watchlist</button>
-        <button class="nav-account-btn" onclick="openPortfolioPage()">📊 Portfolio</button>
+        <button class="nav-account-btn" onclick="openWatchlistPage()">Holdings</button>
+        <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">Alerts<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
         <button class="nav-account-btn" onclick="openAgentPage()">📡 APEX Agent</button>
         <button class="nav-account-btn" onclick="openAccount()">${currentUser.email}</button>
         ${effectiveIsPro() ? '<span class="pro-pill">' + (isPro ? 'PRO' : 'PRO PREVIEW') + '</span>' : ''}
@@ -2002,9 +2013,26 @@
     }
   }
 
+  // Holdings hosts Watchlist and Portfolio as sub-tabs (single screen, toggled sections) —
+  // switchHoldingsTab owns showing/hiding the right section and (re)loading its data, so both
+  // the nav's "Holdings" button and the in-page tab buttons can share one code path.
+  function switchHoldingsTab(tab) {
+    const isWatchlist = tab === 'watchlist';
+    document.getElementById('holdings-tab-btn-watchlist').classList.toggle('active', isWatchlist);
+    document.getElementById('holdings-tab-btn-portfolio').classList.toggle('active', !isWatchlist);
+    document.getElementById('holdings-watchlist-section').style.display = isWatchlist ? 'block' : 'none';
+    document.getElementById('holdings-portfolio-section').style.display = isWatchlist ? 'none' : 'block';
+    if (isWatchlist) {
+      loadWatchlistPage();
+    } else {
+      loadPortfolioPage();
+      loadSectorBreakdown();
+    }
+  }
+
   function openWatchlistPage() {
-    show('s-watchlist');
-    loadWatchlistPage();
+    show('s-holdings');
+    switchHoldingsTab('watchlist');
   }
 
   // Populated at the end of loadWatchlistPage() below — read by exportWatchlistCsv() so the CSV
@@ -3376,8 +3404,8 @@
   let standaloneCompareA = { ticker: '', name: '' };
   let standaloneCompareB = { ticker: '', name: '' };
 
-  function openStandaloneComparePage() {
-    show('s-compare');
+  function openInvestmentsPage() {
+    show('s-investments');
     document.getElementById('standalone-compare-form-card').style.display = 'block';
     document.getElementById('standalone-compare-result-area').style.display = 'none';
     document.getElementById('standalone-compare-result-area').innerHTML = '';
@@ -3683,9 +3711,8 @@
   }
 
   function openPortfolioPage() {
-    show('s-portfolio');
-    loadPortfolioPage();
-    loadSectorBreakdown();
+    show('s-holdings');
+    switchHoldingsTab('portfolio');
   }
 
   // Populated at the end of loadPortfolioPage() below — read by exportPortfolioCsv() so the CSV
