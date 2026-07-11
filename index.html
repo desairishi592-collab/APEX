@@ -20,22 +20,39 @@
     :root {
       --bg: #ffffff; --surface: #f7f7f5; --card: #ffffff;
       --border: #e4e4e4; --border-hover: #c9c9c9;
-      /* Two brand hues — orange drives primary actions/CTAs, turquoise is the secondary/positive
-         signal, distributed across surfaces rather than siloed into one block each. */
-      --accent: #ff7900; --accent-dim: rgba(255,121,0,0.12); --accent-ink: #b35700;
-      --accent-2: #40e0d0; --accent-2-dim: rgba(64,224,208,0.14); --accent-2-ink: #15837a;
+      /* Two brand hues, matched to the landing page redesign — orange drives primary
+         actions/CTAs, turquoise is the secondary/positive signal, distributed across surfaces
+         rather than siloed into one block each. */
+      --accent: #ff6b4a; --accent-dim: #ffede9; --accent-ink: #b34423;
+      --accent-2: #00ffef; --accent-2-dim: #dbfffd; --accent-2-ink: #0a8f83;
       /* Border-tint only now, not a glow color — actual glow box-shadows have been removed. */
-      --accent-glow: rgba(255,121,0,0.35);
+      --accent-glow: rgba(255,107,74,0.35);
       --text: #0b0b0c; --muted: #55575a; --dim: #86888b;
       /* Text-safe ink variants — the vivid brand hexes above fail contrast as text-on-white
-         (turquoise 1.6:1, orange 2.6:1), so status/severity text uses these instead. */
+         (turquoise 1.6:1, orange 2.6:1), so status/severity text uses these instead. Semantic
+         status colors (green/red/amber below), not the two brand hues, so left untouched by the
+         accent recolor — same reasoning applies to the -dim washes reusing the old brand hues. */
       --green: #15837a; --red: #c92b25; --amber: #b35700;
-      --green-dim: rgba(64,224,208,0.14); --red-dim: rgba(232,54,46,0.10); --amber-dim: rgba(255,121,0,0.12);
+      /* These were rgba(...,~0.1-0.14) — translucent tints designed assuming a solid white page
+         behind them. Now that the page background is a gradient, translucency let it bleed
+         through wherever a tinted badge/card sits loose (not nested in an opaque white .card) —
+         found via screenshot on .fix-first-card, a visibly blended blue-orange mess instead of
+         the intended light peach tint. Pre-compositing each over white (the exact color they
+         already rendered as in every safe/nested context) makes them opaque: zero visual change
+         anywhere they were already safe, and it fixes every loose spot at once instead of only
+         the one found by inspection. */
+      --green-dim: #dbfffd; --red-dim: #fdebea; --amber-dim: #ffede9;
       --radius: 6px; --radius-sm: 3px;
       --mono: 'IBM Plex Mono', ui-monospace, monospace;
       --display: 'Fraunces', Georgia, serif;
     }
-    body { background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', -apple-system, sans-serif; min-height: 100vh; line-height: 1.6; }
+    /* Full-page gradient, turquoise -> blue -> orange, same treatment (and same verified
+       contrast/hue math) as the landing page — see apex-landing/index.html for the fuller
+       rationale on why the blue stop and the pale bridge are shaped the way they are. Applied
+       directly to body (not through --bg, which two other rules below still rely on staying
+       plain white for their own white-card contexts) so it covers every .screen automatically —
+       screens are shown/hidden within this one document, not separate pages. */
+    body { background: linear-gradient(180deg, #00ffef 0%, #38bdf8 35%, #38bdf8 52%, #f7fbff 60%, #ffb347 68%, #ffa500 80%, #ff6b4a 100%); color: var(--text); font-family: 'IBM Plex Sans', -apple-system, sans-serif; min-height: 100vh; line-height: 1.6; }
 
     :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) {
@@ -57,19 +74,27 @@
     .connect-wrap { max-width: 640px; margin: 0 auto; padding: 3rem 1.5rem; }
     .connect-hero { text-align: center; margin-bottom: 2.5rem; }
     .connect-hero h1 { font-family: var(--display); font-size: 26px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
-    .connect-hero p { font-size: 15px; color: var(--muted); line-height: 1.7; max-width: 460px; margin: 0 auto; }
+    /* Sits directly on the gradient (not a white card) — var(--muted) fails there (~1.5:1
+       worst-case), so this uses the same rgba(0,0,0,0.8) treatment as the landing page's hero
+       subtext (verified 5.9-16.5:1 across the full gradient). */
+    .connect-hero p { font-size: 15px; color: rgba(0,0,0,0.8); line-height: 1.7; max-width: 460px; margin: 0 auto; }
 
     .mode-toggle { display: flex; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; margin-bottom: 2rem; }
     .mode-btn { flex: 1; padding: 10px 14px; background: transparent; border: none; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: background 0.15s, color 0.15s; }
     .mode-btn:hover { color: var(--text); }
-    .mode-btn.active { background: var(--accent); color: var(--text); }
+    .mode-btn.active { background: var(--text); color: #fff; }
 
-    .drop-zone { border: 1px dashed var(--border-hover); border-radius: var(--radius); padding: 2rem; text-align: center; cursor: pointer; transition: background 0.15s; margin-bottom: 1.5rem; }
-    .drop-zone:hover { background: var(--card); border-color: var(--accent); }
+    /* Now has a default card background (not just on hover) so .drop-sub inside it (var(--muted))
+       stays on a white surface instead of the raw gradient. */
+    .drop-zone { background: var(--card); border: 1px dashed var(--border-hover); border-radius: var(--radius); padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.15s; margin-bottom: 1.5rem; }
+    .drop-zone:hover { border-color: var(--accent); }
     .drop-icon { font-size: 28px; margin-bottom: 8px; display: block; color: var(--muted); }
     .drop-title { font-size: 14px; color: var(--text); margin-bottom: 4px; }
     .drop-sub { font-size: 12px; color: var(--muted); }
-    .file-ok { font-size: 12px; color: var(--green); margin-top: 8px; display: none; text-align: center; }
+    /* Sits loose on the gradient (not a card); var(--green) fails there, and the checkmark in
+       the text already conveys success, so this uses plain safe text color instead of a
+       hard-to-see-on-orange dark green. */
+    .file-ok { font-size: 12px; color: var(--text); margin-top: 8px; display: none; text-align: center; }
 
     .biz-label { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 8px; display: block; }
     .biz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1.5rem; }
@@ -100,7 +125,14 @@
     .btn { padding: 10px 20px; border: none; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: opacity 0.2s, transform 0.1s; }
     .btn:hover { opacity: 0.88; }
     .btn:active { transform: scale(0.98); }
-    .btn-accent { background: var(--accent); color: var(--text); }
+    /* Every button is a solid black fill with white text — same reasoning as the landing page:
+       the only pairing that stays readable no matter where on the gradient it sits. */
+    .btn-accent { background: var(--text); color: #fff; }
+    /* nav's "Sign up" button reuses .btn-accent, but nav itself is the one dark (near-black)
+       surface in the app (left untouched per scope — nav gets reorganized separately) — a black
+       fill there is otherwise indistinguishable from the nav background. Border-only fix, not a
+       structural or nav-layout change. */
+    nav .btn-accent { border: 1px solid rgba(255,255,255,0.35); }
     .btn-full { width: 100%; padding: 13px; font-size: 15px; }
     .err { background: var(--red-dim); border: 1px solid rgba(201,43,37,0.2); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 13px; color: var(--red); margin-top: 1rem; display: none; }
 
@@ -109,10 +141,14 @@
     .loader { width: 60px; height: 60px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.9s linear infinite; margin: 0 auto 1.5rem; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .loading-wrap h2 { font-family: var(--display); font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-    .loading-wrap p { font-size: 14px; color: var(--muted); margin-bottom: 2rem; }
+    /* This whole screen sits loose on the gradient (no card wrapper) — var(--muted)/var(--dim)
+       fail there, so the subtext and checklist use safe dark text instead. The "done" state stays
+       distinguishable via the dot (still --green, a small decorative marker, non-text) plus its
+       position at the top of the list, without needing a hard-to-see-on-orange dark green ink. */
+    .loading-wrap p { font-size: 14px; color: rgba(0,0,0,0.8); margin-bottom: 2rem; }
     .step-list { list-style: none; text-align: left; display: inline-block; }
-    .step-list li { font-size: 13px; color: var(--dim); padding: 5px 0; display: flex; align-items: center; gap: 10px; transition: color 0.3s; }
-    .step-list li.done { color: var(--green); }
+    .step-list li { font-size: 13px; color: rgba(0,0,0,0.75); padding: 5px 0; display: flex; align-items: center; gap: 10px; transition: color 0.3s; }
+    .step-list li.done { color: var(--text); }
     .step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; transition: background 0.3s; }
     .step-list li.done .step-dot { background: var(--green); }
 
@@ -120,8 +156,8 @@
     .results-wrap { max-width: 780px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
     .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 10px; }
     .results-header h2 { font-family: var(--display); font-size: 20px; font-weight: 600; }
-    .rescan-btn { font-size: 13px; color: var(--muted); background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 14px; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: border-color 0.15s, color 0.15s; }
-    .rescan-btn:hover { border-color: var(--border-hover); color: var(--text); }
+    .rescan-btn { font-size: 13px; color: #fff; background: var(--text); border: 1px solid rgba(255,255,255,0.3); border-radius: var(--radius-sm); padding: 7px 14px; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: border-color 0.15s, opacity 0.15s; }
+    .rescan-btn:hover { border-color: #fff; opacity: 0.85; }
 
     .score-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; display: flex; gap: 1.5rem; align-items: center; margin-bottom: 1.25rem; }
     .score-ring-wrap { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
@@ -151,6 +187,16 @@
     .insight-body.ib-desc { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: break-word; word-break: break-word; }
 
     .dive-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 1.25rem; }
+    /* Watchlist and full news feed render their list items (.watchlist-item, .news-row) straight
+       into these containers with no .dive-card wrapper in the HTML — unlike virtually everything
+       else in the app, that left var(--muted)/var(--green)/var(--red) inside them sitting loose
+       directly on the gradient instead of a white card. Giving the containers themselves a
+       dive-card-style surface is a CSS-only fix (no DOM changes) that makes every child's
+       existing color choice correct again, instead of overriding each child class individually. */
+    #watchlist-page-list, #news-page-list {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 4px 1.25rem;
+    }
     /* The compare-stock search dropdown is absolutely positioned and needs to escape this
        card's bounds — .dive-card's overflow:hidden (there to clip content to the rounded
        corners) was clipping/hiding the autocomplete results list. */
@@ -257,10 +303,10 @@
       cursor: pointer; box-shadow: 0 0 0 4px var(--accent-dim);
     }
     .sim-reset-btn {
-      background: none; border: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 500;
-      padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer; transition: border-color 0.15s, color 0.15s;
+      background: var(--text); border: 1px solid rgba(255,255,255,0.3); color: #fff; font-size: 12px; font-weight: 500;
+      padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer; transition: border-color 0.15s, opacity 0.15s;
     }
-    .sim-reset-btn:hover { border-color: var(--border-hover); color: var(--text); }
+    .sim-reset-btn:hover { border-color: #fff; opacity: 0.85; }
 
     /* COMPETITOR SCANNER */
     .competitor-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
@@ -344,9 +390,9 @@
     .trend-delta { font-size: 11px; margin-left: 8px; }
 
     .action-row { display: flex; gap: 10px; }
-    .btn-outline { flex: 1; padding: 11px; background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text); cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: border-color 0.15s; }
-    .btn-outline:hover { border-color: var(--border-hover); }
-    .btn-outline.saved { border-color: var(--green); color: var(--green); }
+    .btn-outline { flex: 1; padding: 11px; background: var(--text); border: 1px solid rgba(255,255,255,0.3); border-radius: var(--radius-sm); font-size: 13px; color: #fff; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: border-color 0.15s, opacity 0.15s; }
+    .btn-outline:hover { border-color: #fff; opacity: 0.85; }
+    .btn-outline.saved { background: var(--green); border-color: var(--green); color: #fff; }
 
     .locked-section { position: relative; }
     .locked-section .lock-overlay {
@@ -370,7 +416,7 @@
     .paywall-card .pw-feature::before { content: '✓'; color: var(--green); font-weight: 600; }
     .unlock-btn {
       display: block; width: 100%; padding: 13px;
-      background: var(--accent); color: var(--text); border: none;
+      background: var(--text); color: #fff; border: none;
       border-radius: var(--radius-sm); font-size: 15px; font-weight: 500;
       cursor: pointer; font-family: 'IBM Plex Sans', sans-serif;
       text-decoration: none; transition: opacity 0.2s;
@@ -1231,7 +1277,7 @@
       </div>
     </div>
 
-    <div id="standalone-compare-loading" style="display:none; text-align:center; padding:1.5rem 0; color:var(--muted); font-size:13px;">
+    <div id="standalone-compare-loading" style="display:none; text-align:center; padding:1.5rem 0; color:rgba(0,0,0,0.8); font-size:13px;">
       Analyzing both companies…
     </div>
 
@@ -4840,8 +4886,8 @@
 
 </script>
 <!-- FLOATING CHAT BUTTON -->
-<div id="chat-fab" onclick="toggleChat()" style="display:none; position:fixed; bottom:24px; right:24px; width:56px; height:56px; border-radius:50%; background:var(--accent); box-shadow:0 4px 16px rgba(0,0,0,0.18); cursor:pointer; z-index:1000; align-items:center; justify-content:center; transition:transform 0.2s;">
-  <div style="font-family:var(--mono); font-weight:700; font-size:14px; color:var(--text); letter-spacing:1px;">AX</div>
+<div id="chat-fab" onclick="toggleChat()" style="display:none; position:fixed; bottom:24px; right:24px; width:56px; height:56px; border-radius:50%; background:var(--text); box-shadow:0 4px 16px rgba(0,0,0,0.18); cursor:pointer; z-index:1000; align-items:center; justify-content:center; transition:transform 0.2s;">
+  <div style="font-family:var(--mono); font-weight:700; font-size:14px; color:#fff; letter-spacing:1px;">AX</div>
   <div id="chat-unread" style="display:none; position:absolute; top:-2px; right:-2px; width:14px; height:14px; border-radius:50%; background:var(--accent-2); border:2px solid var(--bg);"></div>
 </div>
 
@@ -4855,7 +4901,7 @@
   <!-- Panel header -->
   <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--surface);">
     <div style="display:flex; align-items:center; gap:10px;">
-      <div style="width:32px; height:32px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-weight:700; font-size:12px; color:var(--text); flex-shrink:0;">AX</div>
+      <div style="width:32px; height:32px; border-radius:50%; background:var(--text); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-weight:700; font-size:12px; color:#fff; flex-shrink:0;">AX</div>
       <div>
         <div style="font-size:13px; font-weight:600; color:var(--text);">Ask APEX AI</div>
         <div style="font-size:11px; color:var(--muted);">Got questions about your scan?</div>
@@ -4878,7 +4924,7 @@
   <!-- Input -->
   <div style="padding:0.75rem 1rem; display:flex; gap:8px; background:var(--surface);">
     <input id="chat-input" type="text" placeholder="Ask about this scan…" style="flex:1; background:var(--card); border:1px solid var(--border); border-radius:20px; padding:8px 14px; font-size:13px; color:var(--text); font-family:'IBM Plex Sans',sans-serif; outline:none;" onkeydown="if(event.key==='Enter') sendChatMessage()" />
-    <button onclick="sendChatMessage()" style="background:var(--accent); color:var(--text); border:none; border-radius:50%; width:36px; height:36px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0;">↑</button>
+    <button onclick="sendChatMessage()" style="background:var(--text); color:#fff; border:none; border-radius:50%; width:36px; height:36px; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0;">↑</button>
   </div>
 </div>
 
@@ -5261,7 +5307,7 @@
       const goBtn = document.createElement('button');
       goBtn.type = 'button';
       goBtn.textContent = 'Next';
-      goBtn.style.cssText = 'background:var(--accent); color:var(--text); border:none; border-radius:8px; padding:7px 14px; font-size:12px; cursor:pointer; font-weight:600;';
+      goBtn.style.cssText = 'background:var(--text); color:#fff; border:none; border-radius:8px; padding:7px 14px; font-size:12px; cursor:pointer; font-weight:600;';
       const err = document.createElement('div');
       err.style.cssText = 'font-size:11px; color:#c92b25; display:none;';
       goBtn.onclick = () => {
@@ -5295,7 +5341,7 @@
       const confirmBtn = document.createElement('button');
       confirmBtn.type = 'button';
       confirmBtn.textContent = 'Confirm & save';
-      confirmBtn.style.cssText = 'background:var(--accent); color:var(--text); border:none; border-radius:14px; padding:6px 14px; font-size:12px; cursor:pointer; font-weight:600;';
+      confirmBtn.style.cssText = 'background:var(--text); color:#fff; border:none; border-radius:14px; padding:6px 14px; font-size:12px; cursor:pointer; font-weight:600;';
       confirmBtn.onclick = () => confirmWatchCondition(confirmBtn);
       actionsRow.appendChild(cancelBtn);
       actionsRow.appendChild(confirmBtn);
