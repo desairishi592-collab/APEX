@@ -431,6 +431,7 @@
        which visually reads as "centered" rather than docked with the other nav buttons. This
        makes the correct final layout true from first paint, with no JS/auth-state dependency. */
     .nav-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; row-gap: 8px; }
+    .nav-auth-home:empty { display: none; }
     .nav-auth { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; row-gap: 8px; }
     @media (max-width: 640px) {
       nav { padding: 1rem; flex-wrap: wrap; row-gap: 10px; }
@@ -560,6 +561,7 @@
     <span class="nav-logo-text">APEX</span>
   </a>
   <div class="nav-right">
+    <div class="nav-auth-home" id="nav-auth-home"></div>
     <button class="nav-account-btn" onclick="openInvestmentsPage()" id="nav-compare-btn">Investments</button>
     <!-- PHASE 2: user accounts enabled -->
     <div class="nav-auth" id="nav-auth">
@@ -1660,11 +1662,16 @@
   // original button to visibly jump from its standalone position to that new one once this
   // (async — it waits on the session check) function resolved. It's grouped with #nav-auth in
   // the markup/CSS now instead, so its position is correct from first paint for every state.
+  //
+  // "Home" lives in its own #nav-auth-home slot (a sibling that sits before #nav-compare-btn in
+  // the markup) rather than as the first button inside #nav-auth, so the nav order reads
+  // Home / Investments / Holdings / Alerts instead of Investments always leading.
   function renderAuthState() {
     const navAuth = document.getElementById('nav-auth');
+    const navAuthHome = document.getElementById('nav-auth-home');
     if (currentUser) {
+      navAuthHome.innerHTML = `<button class="nav-account-btn" onclick="openHomePage()">Home</button>`;
       navAuth.innerHTML = `
-        <button class="nav-account-btn" onclick="openHomePage()">Home</button>
         <button class="nav-account-btn" onclick="openWatchlistPage()">Holdings</button>
         <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">Alerts<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
         <button class="nav-account-btn" onclick="openAgentPage()">📡 APEX Agent</button>
@@ -1674,12 +1681,14 @@
       `;
       startNotificationPolling();
     } else if (isGuest) {
+      navAuthHome.innerHTML = '';
       navAuth.innerHTML = `
         <span style="font-size:12px; color: var(--muted);">Browsing as guest</span>
         <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')">Sign up</button>
       `;
       stopNotificationPolling();
     } else {
+      navAuthHome.innerHTML = '';
       navAuth.innerHTML = `
         <button class="nav-account-btn" onclick="openAuth('login')">Log in</button>
         <button class="btn btn-accent" style="padding:7px 16px; font-size:13px;" onclick="openAuth('signup')">Sign up</button>
