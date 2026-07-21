@@ -1,16 +1,14 @@
 export const config = { runtime: 'edge' };
 
 import { fetchFreshAnalysis } from '../lib/rescan.js';
-import { resolveSector } from '../lib/sectorBenchmarks.js';
 import { createNotification } from '../lib/notifications.js';
-import { generateDigestNarrative, hasDigestContent } from '../lib/portfolioDigest.js';
+import { generateDigestNarrative, hasDigestContent, buildStockCalls } from '../lib/portfolioDigest.js';
 
 const SUPABASE_URL = 'https://agvwyqslzreqtnmmwxwk.supabase.co';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const SCORE_HISTORY_LOOKBACK_MS = 8 * 24 * 60 * 60 * 1000; // slightly over a week, so last week's
                                                             // earliest snapshot is reliably included
                                                             // even if a cron run landed a few hours late
-const EARNINGS_LOOKAHEAD_DAYS = 21;   // ~3 weeks out — near enough to be genuinely useful in a weekly digest
 const MOVER_THRESHOLD = 5;            // out of 100 — smaller than check-market-alerts.js's 8pt alert
                                        // threshold on purpose: a WEEKLY digest should surface more
                                        // gradual drift than a single day-over-day alert would catch
@@ -131,74 +129,30 @@ async function fetchScoreHistoryDeltas(serviceRoleKey, tickers) {
   return deltas;
 }
 
-// One Finnhub profile2 call per ticker (cheap — no AI cost, same endpoint lib/stockAnalysis.js
-// already calls per scan) to resolve each ticker's sector via the existing resolveSector()
-// lookup table, for the digest's proactive sector-level comparison. Best-effort: a ticker that
-// fails to resolve is simply excluded from the comparison, not a hard failure.
-async function fetchSectorByTicker(finnhubKey, tickers) {
-  const sectorByTicker = {};
-  await Promise.all(tickers.map(async (ticker) => {
-    try {
-      const res = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${finnhubKey}`);
-      const profile = await res.json();
-      const industry = profile?.finnhubIndustry || profile?.gsector;
-      if (industry) sectorByTicker[ticker] = resolveSector(industry).label;
-    } catch {
-      // Non-fatal: this ticker just gets excluded from the sector comparison
-    }
-  }));
-  return sectorByTicker;
-}
-
-// Finnhub's calendar/earnings endpoint, scoped to one ticker + a lookahead window — not used
-// anywhere else in APEX yet, added here since the digest explicitly calls for upcoming earnings
-// awareness. Best-effort per the task's own "if available via Finnhub" framing.
-async function fetchNextEarningsByTicker(finnhubKey, tickers) {
-  const earningsByTicker = {};
-  const from = new Date().toISOString().slice(0, 10);
-  const to = new Date(Date.now() + EARNINGS_LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  await Promise.all(tickers.map(async (ticker) => {
-    try {
-      const res = await fetch(`https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&symbol=${encodeURIComponent(ticker)}&token=${finnhubKey}`);
-      const data = await res.json();
-      const upcoming = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar.find(e => e?.date) : null;
-      if (upcoming) earningsByTicker[ticker] = upcoming.date;
-    } catch {
-      // Non-fatal: earnings dates are a nice-to-have, not required for the digest
-    }
-  }));
-  return earningsByTicker;
-}
-
-// Groups a user's own holdings by resolved sector and averages their current score per sector —
-// the "one sector-level comparison the user didn't explicitly request." Returns [] (not a
-// single-entry list) when there's only one sector represented, since a "comparison" needs at
-// least two things to compare.
-function buildSectorComparison(tickerRows, sectorByTicker) {
-  const bySector = {};
-  for (const row of tickerRows) {
-    const sector = sectorByTicker[row.ticker];
-    if (!sector || typeof row.score !== 'number') continue;
-    if (!bySector[sector]) bySector[sector] = { scores: [], tickers: [] };
-    bySector[sector].scores.push(row.score);
-    bySector[sector].tickers.push(row.ticker);
-  }
-  const sectors = Object.entries(bySector).map(([sector, { scores, tickers }]) => ({
-    sector,
-    avgScore: Math.round(scores.reduce((s, v) => s + v, 0) / scores.length),
-    tickers
-  }));
-  return sectors.length >= 2 ? sectors.sort((a, b) => b.avgScore - a.avgScore) : [];
-}
-
-// The digest's entire email content: one synthesized narrative (lib/portfolioDigest.js), not the
-// bullet-point sections this used to be (one per data source, each restating raw numbers). The
-// underlying data those old sections showed — score trend, signal changes, triggered alerts,
-// movers, red flags, earnings, sector comparison — all still feeds the narrative below; only the
-// presentation collapsed from N stitched sections into one connected analyst-style paragraph.
+// The digest's email content: a 2-sentence AI summary (lib/portfolioDigest.js) of what happened
+// this week, plus a deterministic per-stock Buy/Hold/Avoid call for every tracked ticker.
+// Sector-average and upcoming-earnings sections were deliberately dropped — filler relative to
+// these two.
 function digestNarrativeSection(narrative) {
   if (!narrative) return '';
-  return `<p style="margin:0;font-size:15px;line-height:1.6;">${escapeHtml(narrative)}</p>`;
+  return `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${escapeHtml(narrative)}</p>`;
+}
+
+function stockCallColor(call) {
+  return call === 'Buy' ? '#1a7f37' : call === 'Avoid' ? '#c92b25' : '#8a6d00';
+}
+
+function stockCallsSection(stockCalls) {
+  if (!stockCalls.length) return '';
+  const rows = stockCalls.map(c => `<li style="margin:0 0 6px;font-size:14px;">
+    <strong>${escapeHtml(c.ticker)}</strong> (${escapeHtml(c.companyName)}) —
+    <span style="color:${stockCallColor(c.call)};font-weight:600;">${escapeHtml(c.call)}</span>
+  </li>`).join('');
+  return `<div style="margin:0 0 12px;">
+    <div style="font-size:13px;font-weight:600;color:#555;margin-bottom:8px;">This week's calls</div>
+    <ul style="margin:0;padding-left:18px;">${rows}</ul>
+  </div>
+  <p style="margin:0;font-size:11px;color:#888;line-height:1.5;">Signals reflect APEX's own scoring model at the time of this email — not personalized investment advice.</p>`;
 }
 
 async function sendDigestEmail(resendKey, email, sections) {
@@ -220,12 +174,12 @@ async function sendDigestEmail(resendKey, email, sections) {
 
 // Runs every Monday at 9am (see vercel.json crons) — the same slot this cron already had; no new
 // cron slot added (Vercel Hobby caps this project at 2, both already spoken for by this file and
-// api/check-market-alerts.js). For every registered user, aggregates four independent sources —
-// owner-mode scan trend, watchlist signal drift, price alerts triggered in the past week, and
-// score movers/red-flags/insider activity/upcoming earnings/a sector comparison — exactly as
-// before, then synthesizes ALL of it into ONE short analyst-style narrative (lib/portfolioDigest.js)
-// instead of separate bullet-point sections. Delivered in-app unconditionally when there's
-// anything to report; email is the nice-to-have layered on top if Resend is configured.
+// api/check-market-alerts.js). For every registered user, aggregates owner-mode scan trend,
+// watchlist signal drift, price alerts triggered in the past week, score movers, and red-flag/
+// insider activity into a 2-sentence AI summary (lib/portfolioDigest.js), plus a deterministic
+// per-stock Buy/Hold/Avoid call for every tracked ticker — no sector-average or upcoming-earnings
+// filler. Delivered in-app unconditionally when there's anything to report; email is the
+// nice-to-have layered on top if Resend is configured.
 export default async function handler(req) {
   // Fail CLOSED (require CRON_SECRET to be configured) rather than silently allowing public
   // access if the env var is ever missing/misconfigured.
@@ -239,9 +193,6 @@ export default async function handler(req) {
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const resendKey = process.env.RESEND_API_KEY;
-  const finnhubKey = process.env.FINNHUB_API_KEY; // only needed for the new portfolio digest's
-                                                   // sector comparison + earnings lookups below;
-                                                   // score-mover and red-flag data don't need it
 
   if (!serviceRoleKey) {
     return new Response(JSON.stringify({ error: 'Server misconfiguration: missing SUPABASE_SERVICE_ROLE_KEY' }), {
@@ -288,7 +239,11 @@ export default async function handler(req) {
     }
 
     // ── 2. Watchlist signal changes (re-scans each ticker fresh, then updates the baseline) ──
+    // Also records every ticker's freshly re-scanned signal (not just the ones that changed)
+    // into freshSignalByTicker, so section 4's per-stock Buy/Hold/Avoid calls use this week's
+    // live signal for watchlist tickers instead of the (up to a week stale) DB column.
     const signalChanges = [];
+    const freshSignalByTicker = {};
     try {
       const watchlist = await supabaseSelect(
         serviceRoleKey,
@@ -297,6 +252,7 @@ export default async function handler(req) {
       for (const row of watchlist) {
         const fresh = await fetchFreshSignal(origin, row.ticker, row.company_name);
         if (!fresh) continue;
+        freshSignalByTicker[row.ticker] = fresh.signal;
         if (row.signal && fresh.signal !== row.signal) {
           signalChanges.push({ ticker: row.ticker, companyName: row.company_name, oldSignal: row.signal, newSignal: fresh.signal });
         }
@@ -319,28 +275,23 @@ export default async function handler(req) {
       // Non-fatal: skip the triggered-alerts section for this user this week
     }
 
-    // ── 4. Score movers (from score_history), new red flags/insider activity, upcoming
-    // earnings, and a proactive sector-level comparison. This doesn't re-scan anything — it
-    // reads data already computed elsewhere (score_history snapshots, existing red_flag
-    // notifications, sector-benchmark resolution), plus two lightweight non-AI Finnhub calls
-    // (profile2, calendar/earnings). Aggregation logic is unchanged from before; only the
-    // variables are now hoisted out to the loop scope so section 5 below can fold them into the
-    // SAME narrative as sections 1-3, instead of section 4 getting its own separate narrative
-    // while 1-3 stayed raw bullet HTML.
-    let movers = [], redFlagEvents = [], earnings = [], sectorComparison = [];
+    // ── 4. Score movers (from score_history), new red flags/insider activity, and a per-stock
+    // Buy/Hold/Avoid call for every tracked ticker. This doesn't re-scan anything beyond what
+    // section 2 already did for watchlist tickers — reads score_history snapshots, existing
+    // red_flag notifications, and each ticker's `signal` column (portfolio_holdings' own, or
+    // section 2's freshly re-scanned value for watchlist tickers).
+    let movers = [], redFlagEvents = [], stockCalls = [];
     try {
       const [watchlistForDigest, portfolioForDigest] = await Promise.all([
-        supabaseSelect(serviceRoleKey, `watchlist?select=ticker,company_name,score&user_id=eq.${user.id}`),
-        supabaseSelect(serviceRoleKey, `portfolio_holdings?select=ticker,company_name,score&user_id=eq.${user.id}`)
+        supabaseSelect(serviceRoleKey, `watchlist?select=ticker,company_name,score,signal&user_id=eq.${user.id}`),
+        supabaseSelect(serviceRoleKey, `portfolio_holdings?select=ticker,company_name,score,signal&user_id=eq.${user.id}`)
       ]);
       const tickerRows = dedupeTickerRows([...watchlistForDigest, ...portfolioForDigest]).slice(0, MAX_DIGEST_TICKERS_PER_USER);
 
       if (tickerRows.length) {
         const tickers = tickerRows.map(r => r.ticker);
-        const [deltas, sectorByTicker, earningsByTicker, redFlagNotifs] = await Promise.all([
+        const [deltas, redFlagNotifs] = await Promise.all([
           fetchScoreHistoryDeltas(serviceRoleKey, tickers),
-          finnhubKey ? fetchSectorByTicker(finnhubKey, tickers) : Promise.resolve({}),
-          finnhubKey ? fetchNextEarningsByTicker(finnhubKey, tickers) : Promise.resolve({}),
           supabaseSelect(serviceRoleKey, `notifications?select=ticker,company_name,title,body&user_id=eq.${user.id}&type=eq.red_flag&created_at=gte.${sevenDaysAgo}`).catch(() => [])
         ]);
 
@@ -350,28 +301,27 @@ export default async function handler(req) {
           .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
           .slice(0, TOP_MOVERS_PER_USER);
 
-        earnings = tickerRows
-          .filter(r => earningsByTicker[r.ticker])
-          .map(r => ({ ticker: r.ticker, companyName: r.company_name, date: earningsByTicker[r.ticker] }));
-
-        sectorComparison = buildSectorComparison(tickerRows, sectorByTicker);
         redFlagEvents = redFlagNotifs;
+        stockCalls = buildStockCalls(tickerRows, freshSignalByTicker);
       }
     } catch (e) {
       console.error('Portfolio digest data aggregation failed for user', user.id, e.message);
     }
 
-    // ── 5. Narrative synthesis: ONE Groq call (lib/portfolioDigest.js, same Groq→OpenRouter
-    // fallback as the rest of APEX Agent) weaves ALL of the above — score trend, signal changes,
-    // triggered alerts, movers, red flags, earnings, sector comparison — into a short, connected
-    // "week in review," replacing what used to be three separate raw bullet sections plus one
-    // narrower narrative covering only section 4. Delivered in-app unconditionally (below) —
-    // email inclusion (further below) is the nice-to-have layered on top.
+    // ── 5. Summary synthesis: ONE Groq call (lib/portfolioDigest.js, same Groq→OpenRouter
+    // fallback as the rest of APEX Agent) weaves score trend, signal changes, triggered alerts,
+    // movers, and red flags into a 2-sentence "week in review." The per-stock Buy/Hold/Avoid
+    // calls from section 4 are deterministic (no AI) and appended separately, both in-app and
+    // in the email. Delivered in-app unconditionally (below) — email inclusion (further below)
+    // is the nice-to-have layered on top.
     let digestNarrative = null;
     try {
-      const digestCtx = { scoreTrend, signalChanges, triggeredAlerts, movers, redFlagEvents, earnings, sectorComparison };
+      const digestCtx = { scoreTrend, signalChanges, triggeredAlerts, movers, redFlagEvents, stockCalls };
       if (hasDigestContent(digestCtx)) {
         digestNarrative = await generateDigestNarrative(digestCtx);
+        const callsText = stockCalls.length
+          ? `\n\nThis week's calls:\n${stockCalls.map(c => `${c.ticker} (${c.companyName}): ${c.call}`).join('\n')}`
+          : '';
         const created = await createNotification(serviceRoleKey, {
           userId: user.id,
           type: 'weekly_digest',
@@ -381,7 +331,7 @@ export default async function handler(req) {
                                 // so a non-null placeholder is the safer default
           companyName: null,
           title: 'Your weekly portfolio digest',
-          body: digestNarrative
+          body: digestNarrative + callsText
         });
         if (created) digestsCreated++;
       }
@@ -393,7 +343,7 @@ export default async function handler(req) {
     if (!resendKey) continue;
 
     try {
-      const sent = await sendDigestEmail(resendKey, user.email, [digestNarrativeSection(digestNarrative)]);
+      const sent = await sendDigestEmail(resendKey, user.email, [digestNarrativeSection(digestNarrative), stockCallsSection(stockCalls)]);
       if (sent) emailsSent++;
     } catch {
       // Non-fatal: this user just misses this week's digest
