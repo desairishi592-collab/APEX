@@ -757,6 +757,9 @@
       </div>
       <input type="file" id="file-in" accept=".csv,.xlsx,.pdf,.txt" style="display:none" onchange="onFile(this)" />
       <div class="file-ok" id="file-ok">✓ <span id="file-name-label"></span> ready</div>
+      <div style="text-align:center; margin: 4px 0 12px;">
+        <a href="#" onclick="event.preventDefault(); openGuidedIntake();" style="font-size:12px; color:var(--muted); text-decoration:underline;">Don't have a bank statement? Try a guided form instead →</a>
+      </div>
 
       <span class="biz-label" id="biz-label-text">Tell APEX about your business</span>
       <div class="biz-grid">
@@ -1292,12 +1295,101 @@
 
     <div class="dive-card">
       <div class="dive-body">
+        <div class="section-title">No bank statement handy?</div>
+        <p style="font-size:13px; color:var(--muted); line-height:1.6; margin-bottom:14px;">
+          Answer a short guided form instead — revenue, expenses, payroll, cash on hand, and debt —
+          and APEX Agent will generate a full health report from that, on request, the same as any
+          other scan.
+        </p>
+        <button class="btn btn-outline btn-full" onclick="openGuidedIntake()">📝 Generate a guided report</button>
+      </div>
+    </div>
+
+    <div class="dive-card">
+      <div class="dive-body">
         <div class="section-title">Recent alerts</div>
         <div id="agent-alerts-list">
           <div class="history-loading">Loading alerts…</div>
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- SCREEN: GUIDED FINANCIAL INTAKE — alternative to the bank-statement upload in form-private,
+     for businesses that don't want to upload real bank statements. Feeds the same /api/analyze
+     private-business path as manual entry/file upload (see runGuidedIntakeScan()) — the richer
+     detail this form collects (revenue trend, payroll, cash on hand, debt) is packed into the
+     existing fileContent field as a synthesized summary, so the AI prompt (api/analyze.js) grounds
+     on it exactly like an uploaded document, with zero backend changes required. -->
+<div class="screen" id="s-guided-intake">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Guided report</h2>
+      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+    </div>
+
+    <div class="err" id="gi-privacy-note" style="display:block; background: var(--green-dim); border-color: rgba(21,131,122,0.25); color: var(--green);">
+      ✓ No bank login or account numbers are ever requested here — just the numbers you type in below.
+      If you're logged in, the resulting report is saved to your scan history like any other scan;
+      as a guest, it's a one-time report that isn't stored anywhere.
+    </div>
+
+    <span class="biz-label">Tell APEX about your business</span>
+    <div class="biz-grid">
+      <input type="text" id="gi-biz-name" placeholder="Business name (optional)" />
+      <select id="gi-industry">
+        <option value="">Industry</option>
+        <option>Banking / Finance</option>
+        <option>Retail</option>
+        <option>SaaS / Tech</option>
+        <option>Restaurant / Food</option>
+        <option>Consulting / Services</option>
+        <option>E-commerce</option>
+        <option>Construction / Trades</option>
+        <option>Healthcare</option>
+        <option>Manufacturing</option>
+        <option>Other</option>
+      </select>
+      <input type="text" id="gi-employees" placeholder="Number of employees" />
+      <input type="text" id="gi-age" placeholder="Years in business" />
+    </div>
+
+    <span class="biz-label">Monthly revenue (trend helps — fill in what you have)</span>
+    <div class="biz-grid">
+      <input type="text" id="gi-rev-m3" placeholder="3 months ago ($, optional)" oninput="updateGuidedProfit()" />
+      <input type="text" id="gi-rev-m2" placeholder="2 months ago ($, optional)" oninput="updateGuidedProfit()" />
+      <input type="text" id="gi-rev-m1" placeholder="Last month ($, required)" oninput="updateGuidedProfit()" />
+    </div>
+
+    <span class="biz-label">Monthly expenses</span>
+    <div class="biz-grid">
+      <input type="text" id="gi-exp-total" placeholder="Total monthly expenses ($, required)" oninput="updateGuidedProfit()" />
+      <input type="text" id="gi-exp-fixed" placeholder="Of which fixed ($, optional)" />
+      <input type="text" id="gi-exp-variable" placeholder="Of which variable ($, optional)" />
+    </div>
+
+    <span class="biz-label">Payroll &amp; cash position</span>
+    <div class="biz-grid">
+      <input type="text" id="gi-payroll" placeholder="Total monthly payroll cost ($, optional)" />
+      <input type="text" id="gi-cash" placeholder="Cash on hand / bank balance ($, optional)" />
+    </div>
+
+    <span class="biz-label">Debt</span>
+    <div class="biz-grid">
+      <input type="text" id="gi-debt-total" placeholder="Outstanding debt ($, optional)" />
+      <input type="text" id="gi-debt-payment" placeholder="Monthly debt payment ($, optional)" />
+    </div>
+
+    <div class="dive-row-block" style="margin: 14px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);">
+      <div class="dive-row" style="border-bottom: none; padding: 0;">
+        <span class="dr-label">Estimated monthly profit (revenue − expenses)</span>
+        <span class="dr-val" id="gi-profit-display">—</span>
+      </div>
+    </div>
+
+    <button class="btn btn-accent btn-full" onclick="runGuidedIntakeScan()" id="gi-run-btn">Generate report →</button>
+    <div class="err" id="gi-err-box"></div>
   </div>
 </div>
 
@@ -2211,22 +2303,30 @@
   }
 
   function exportWatchlistCsv() {
-    if (!watchlistExportRows.length) return;
-    const rows = [['Ticker', 'Company Name', 'Price', 'Change', 'Change %', 'APEX Score', 'Safety Score', 'Signal']];
-    watchlistExportRows.forEach(w => {
-      const q = w.quote;
-      rows.push([
-        w.ticker,
-        w.company_name || w.ticker,
-        q && typeof q.price === 'number' ? q.price.toFixed(2) : '',
-        q && typeof q.change === 'number' ? q.change.toFixed(2) : '',
-        q && typeof q.percentChange === 'number' ? q.percentChange.toFixed(2) + '%' : '',
-        w.score ?? '',
-        w.safety_score ?? '',
-        w.signal || ''
-      ]);
-    });
-    downloadCsv(`apex-watchlist-${todayDateStamp()}.csv`, rows);
+    if (!watchlistExportRows.length) {
+      alert('Nothing to export yet — your watchlist may still be loading, or is empty.');
+      return;
+    }
+    try {
+      const rows = [['Ticker', 'Company Name', 'Price', 'Change', 'Change %', 'APEX Score', 'Safety Score', 'Signal']];
+      watchlistExportRows.forEach(w => {
+        const q = w.quote;
+        rows.push([
+          w.ticker,
+          w.company_name || w.ticker,
+          q && typeof q.price === 'number' ? q.price.toFixed(2) : '',
+          q && typeof q.change === 'number' ? q.change.toFixed(2) : '',
+          q && typeof q.percentChange === 'number' ? q.percentChange.toFixed(2) + '%' : '',
+          w.score ?? '',
+          w.safety_score ?? '',
+          w.signal || ''
+        ]);
+      });
+      downloadCsv(`apex-watchlist-${todayDateStamp()}.csv`, rows);
+    } catch (e) {
+      console.error('Watchlist CSV export failed:', e);
+      alert('Could not generate the CSV — please try again.');
+    }
   }
 
   // `opts.readOnly` drops the remove button — used by the Home dashboard preview, whose combined
@@ -3165,6 +3265,139 @@
     } catch(e) {
       show('s-connect');
       const err = document.getElementById('err-box');
+      err.textContent = 'Something went wrong: ' + e.message;
+      err.style.display = 'block';
+    }
+  }
+
+  // ── GUIDED FINANCIAL INTAKE ── (alternative to the bank-statement upload in form-private, for
+  // businesses that don't want to upload real bank statements — see s-guided-intake above)
+  function openGuidedIntake() {
+    show('s-guided-intake');
+  }
+
+  function parseGuidedNum(id) {
+    const raw = document.getElementById(id).value.trim();
+    if (!raw) return null;
+    const n = Number(raw.replace(/[^0-9.\-]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function updateGuidedProfit() {
+    const revenue = parseGuidedNum('gi-rev-m1');
+    const expenses = parseGuidedNum('gi-exp-total');
+    const el = document.getElementById('gi-profit-display');
+    if (revenue == null || expenses == null) {
+      el.textContent = '—';
+      el.className = 'dr-val';
+      return;
+    }
+    const profit = revenue - expenses;
+    el.textContent = (profit < 0 ? '-$' : '$') + Math.abs(profit).toLocaleString();
+    el.className = 'dr-val ' + (profit > 0 ? 'grn' : profit < 0 ? 'red' : '');
+  }
+
+  // Builds the same kind of "uploaded document excerpt" text api/analyze.js already knows how to
+  // ground its prompt on (see its fileContent handling) — this is what lets the guided form reuse
+  // the existing private-business analysis path with zero backend changes: the extra detail this
+  // form collects that the plain manual-entry fields don't (revenue trend, payroll, cash on hand,
+  // debt) rides along as if it were parsed from an uploaded file.
+  function buildGuidedIntakeSummary(fields) {
+    const lines = ['Guided financial intake form (business-provided directly, not a bank statement):'];
+    const revLabels = ['3 months ago', '2 months ago', 'Last month'];
+    const revTrend = [fields.revM3, fields.revM2, fields.revM1]
+      .map((v, i) => v != null ? `${revLabels[i]}: $${v.toLocaleString()}` : null)
+      .filter(Boolean);
+    if (revTrend.length) lines.push(`Monthly revenue trend — ${revTrend.join(', ')}`);
+    if (fields.expFixed != null || fields.expVariable != null) {
+      lines.push(`Monthly expenses breakdown — fixed: ${fields.expFixed != null ? '$' + fields.expFixed.toLocaleString() : 'not provided'}, variable: ${fields.expVariable != null ? '$' + fields.expVariable.toLocaleString() : 'not provided'}`);
+    }
+    if (fields.payroll != null) lines.push(`Total monthly payroll cost: $${fields.payroll.toLocaleString()}`);
+    if (fields.cash != null) lines.push(`Cash on hand / bank balance: $${fields.cash.toLocaleString()}`);
+    if (fields.debtTotal != null) lines.push(`Outstanding debt: $${fields.debtTotal.toLocaleString()}`);
+    if (fields.debtPayment != null) lines.push(`Monthly debt payment: $${fields.debtPayment.toLocaleString()}`);
+    lines.push(`Computed monthly profit (last month's revenue − total expenses): $${(fields.revM1 - fields.expTotal).toLocaleString()}`);
+    return lines.join('\n');
+  }
+
+  async function runGuidedIntakeScan() {
+    if (!(await checkScanAllowed('gi-err-box'))) return;
+
+    const bizName = document.getElementById('gi-biz-name').value.trim();
+    const industry = document.getElementById('gi-industry').value;
+    const employees = document.getElementById('gi-employees').value.trim();
+    const age = document.getElementById('gi-age').value.trim();
+    const revM1 = parseGuidedNum('gi-rev-m1');
+    const expTotal = parseGuidedNum('gi-exp-total');
+
+    ['gi-industry', 'gi-employees', 'gi-age', 'gi-rev-m1', 'gi-exp-total'].forEach(id => {
+      document.getElementById(id).style.borderColor = '';
+    });
+
+    const missing = [];
+    if (!industry) missing.push('gi-industry');
+    if (!employees) missing.push('gi-employees');
+    if (!age) missing.push('gi-age');
+    if (revM1 == null) missing.push('gi-rev-m1');
+    if (expTotal == null) missing.push('gi-exp-total');
+
+    if (missing.length) {
+      missing.forEach(id => { document.getElementById(id).style.borderColor = '#c92b25'; });
+      const err = document.getElementById('gi-err-box');
+      err.textContent = "⚠ Please fill in industry, employees, years in business, last month's revenue, and total monthly expenses — everything else is optional.";
+      err.style.display = 'block';
+      return;
+    }
+
+    const fields = {
+      revM3: parseGuidedNum('gi-rev-m3'),
+      revM2: parseGuidedNum('gi-rev-m2'),
+      revM1,
+      expTotal,
+      expFixed: parseGuidedNum('gi-exp-fixed'),
+      expVariable: parseGuidedNum('gi-exp-variable'),
+      payroll: parseGuidedNum('gi-payroll'),
+      cash: parseGuidedNum('gi-cash'),
+      debtTotal: parseGuidedNum('gi-debt-total'),
+      debtPayment: parseGuidedNum('gi-debt-payment')
+    };
+    const summary = buildGuidedIntakeSummary(fields);
+
+    show('s-loading');
+    ['st1','st2','st3','st4','st5'].forEach((id, i) => {
+      setTimeout(() => document.getElementById(id).classList.add('done'), 700 + i * 800);
+    });
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bizName: bizName || 'Your business',
+          industry,
+          revenue: revM1,
+          expenses: expTotal,
+          employees,
+          age,
+          source: 'Guided intake form',
+          fileContent: summary,
+          mode: scanMode
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
+      scanData = data;
+      currentScanBizName = bizName || 'Your business';
+      renderResults(data);
+      if (currentUser) {
+        await saveScanAndIncrement(currentScanBizName, industry, data);
+      } else if (isGuest) {
+        guestScanCount += 1;
+      }
+    } catch (e) {
+      show('s-guided-intake');
+      const err = document.getElementById('gi-err-box');
       err.textContent = 'Something went wrong: ' + e.message;
       err.style.display = 'block';
     }
@@ -4209,31 +4442,39 @@
   const PORTFOLIO_CSV_SUB_CATEGORIES = ['Profitability', 'Financial Health', 'Valuation', 'Risk (Volatility)', 'Momentum'];
 
   function exportPortfolioCsv() {
-    if (!portfolioExportRows.length) return;
-    const header = ['Ticker', 'Company Name', 'Shares', 'Cost Basis', 'Current Price', 'Gain/Loss $', 'Gain/Loss %', 'APEX Score', 'Red Flags', 'Sector', ...PORTFOLIO_CSV_SUB_CATEGORIES.map(c => c + ' (0-10)')];
-    const rows = [header];
-    portfolioExportRows.forEach(h => {
-      const gainLoss = h.currentPrice != null ? (h.currentPrice - h.purchasePrice) * h.shares : null;
-      const gainLossPct = h.currentPrice != null ? ((h.currentPrice - h.purchasePrice) / h.purchasePrice) * 100 : null;
-      const subScoreValues = PORTFOLIO_CSV_SUB_CATEGORIES.map(cat => {
-        const s = Array.isArray(h.subScores) ? h.subScores.find(x => x.category === cat) : null;
-        return s ? s.score : '';
+    if (!portfolioExportRows.length) {
+      alert('Nothing to export yet — your portfolio may still be loading, or is empty.');
+      return;
+    }
+    try {
+      const header = ['Ticker', 'Company Name', 'Shares', 'Cost Basis', 'Current Price', 'Gain/Loss $', 'Gain/Loss %', 'APEX Score', 'Red Flags', 'Sector', ...PORTFOLIO_CSV_SUB_CATEGORIES.map(c => c + ' (0-10)')];
+      const rows = [header];
+      portfolioExportRows.forEach(h => {
+        const gainLoss = h.currentPrice != null ? (h.currentPrice - h.purchasePrice) * h.shares : null;
+        const gainLossPct = h.currentPrice != null ? ((h.currentPrice - h.purchasePrice) / h.purchasePrice) * 100 : null;
+        const subScoreValues = PORTFOLIO_CSV_SUB_CATEGORIES.map(cat => {
+          const s = Array.isArray(h.subScores) ? h.subScores.find(x => x.category === cat) : null;
+          return s ? s.score : '';
+        });
+        rows.push([
+          h.ticker,
+          h.companyName,
+          h.shares,
+          Number.isFinite(h.purchasePrice) ? h.purchasePrice.toFixed(2) : '',
+          h.currentPrice != null ? h.currentPrice.toFixed(2) : '',
+          gainLoss != null ? gainLoss.toFixed(2) : '',
+          gainLossPct != null ? gainLossPct.toFixed(1) + '%' : '',
+          h.apexScore ?? '',
+          h.redFlagCount ?? '',
+          h.sector || '',
+          ...subScoreValues
+        ]);
       });
-      rows.push([
-        h.ticker,
-        h.companyName,
-        h.shares,
-        h.purchasePrice.toFixed(2),
-        h.currentPrice != null ? h.currentPrice.toFixed(2) : '',
-        gainLoss != null ? gainLoss.toFixed(2) : '',
-        gainLossPct != null ? gainLossPct.toFixed(1) + '%' : '',
-        h.apexScore ?? '',
-        h.redFlagCount ?? '',
-        h.sector || '',
-        ...subScoreValues
-      ]);
-    });
-    downloadCsv(`apex-portfolio-${todayDateStamp()}.csv`, rows);
+      downloadCsv(`apex-portfolio-${todayDateStamp()}.csv`, rows);
+    } catch (e) {
+      console.error('Portfolio CSV export failed:', e);
+      alert('Could not generate the CSV — please try again.');
+    }
   }
 
   async function loadPortfolioVerdict(holdings, aggregateScore) {
@@ -4987,7 +5228,11 @@
         image: { type: 'jpeg', quality: 0.95 },
         // Excludes .no-print elements (action buttons, the "Pro Coming Soon" banner) from the
         // capture — they're page chrome, not part of the report itself.
-        html2canvas: { scale: 2, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, ignoreElements: (el) => el.classList.contains('no-print') },
+        // windowWidth/windowHeight pin the capture to the report's own natural content size
+        // instead of the browser's current viewport — without this, a narrow/zoomed window
+        // reflows the report narrower than normal and can crop wide rows/tables off the right
+        // edge of the page, independent of the scroll-offset bug fixed above.
+        html2canvas: { scale: 2, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, windowWidth: target.scrollWidth, windowHeight: target.scrollHeight, ignoreElements: (el) => el.classList.contains('no-print') },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
         // 'avoid-all' (removed) tells html2pdf's pagebreak plugin to protect EVERY element in the
         // report from a mid-element split, not just cards/rows — on a long report that's dozens
@@ -5010,49 +5255,57 @@
 
   // ── SCAN REPORT CSV EXPORT ──
   function exportScanCsv() {
-    if (!scanData) return;
-    const d = scanData;
-    const rows = [];
-
-    rows.push(['Company', currentScanBizName || currentStockTicker || 'Unknown']);
-    if (d.isPublicStock && currentStockTicker) rows.push(['Ticker', currentStockTicker]);
-    rows.push(['Mode', scanMode === 'investor' ? 'Investor' : 'Owner']);
-    rows.push(['Score', `${d.score}/100`]);
-    rows.push(['Status', d.status || '']);
-    rows.push(['Summary', d.summary || '']);
-    rows.push(['Date', todayDateStamp()]);
-
-    if (Array.isArray(d.metrics) && d.metrics.length) {
-      rows.push([]);
-      rows.push(['Metrics']);
-      rows.push(['Label', 'Value', 'Trend']);
-      d.metrics.forEach(m => rows.push([m.label, m.value, m.trend]));
+    if (!scanData) {
+      alert('No scan report loaded yet — run or open a scan first.');
+      return;
     }
+    try {
+      const d = scanData;
+      const rows = [];
 
-    // STOCK ONLY: explainable sub-score breakdown — the "sub-score breakdown" the task calls out
-    if (d.isPublicStock && Array.isArray(d.subScores) && d.subScores.length) {
-      rows.push([]);
-      rows.push(['Sub-Score Breakdown']);
-      rows.push(['Category', 'Score (0-10)', 'Weight', 'Reason']);
-      d.subScores.forEach(s => rows.push([s.category, s.score, s.weightLabel || '', s.reason || '']));
+      rows.push(['Company', currentScanBizName || currentStockTicker || 'Unknown']);
+      if (d.isPublicStock && currentStockTicker) rows.push(['Ticker', currentStockTicker]);
+      rows.push(['Mode', scanMode === 'investor' ? 'Investor' : 'Owner']);
+      rows.push(['Score', `${d.score}/100`]);
+      rows.push(['Status', d.status || '']);
+      rows.push(['Summary', d.summary || '']);
+      rows.push(['Date', todayDateStamp()]);
+
+      if (Array.isArray(d.metrics) && d.metrics.length) {
+        rows.push([]);
+        rows.push(['Metrics']);
+        rows.push(['Label', 'Value', 'Trend']);
+        d.metrics.forEach(m => rows.push([m.label, m.value, m.trend]));
+      }
+
+      // STOCK ONLY: explainable sub-score breakdown — the "sub-score breakdown" the task calls out
+      if (d.isPublicStock && Array.isArray(d.subScores) && d.subScores.length) {
+        rows.push([]);
+        rows.push(['Sub-Score Breakdown']);
+        rows.push(['Category', 'Score (0-10)', 'Weight', 'Reason']);
+        d.subScores.forEach(s => rows.push([s.category, s.score, s.weightLabel || '', s.reason || '']));
+      }
+
+      if (Array.isArray(d.costCuts) && d.costCuts.length) {
+        rows.push([]);
+        rows.push([scanMode === 'investor' ? 'Key Risks' : 'Cost Cuts']);
+        rows.push(['Title', 'Description', 'Severity']);
+        d.costCuts.forEach(c => rows.push([c.title, c.desc, c.color === 'red' ? 'High' : c.color === 'amb' ? 'Medium' : 'Low']));
+      }
+
+      if (d.isPublicStock && Array.isArray(d.redFlags) && d.redFlags.length) {
+        rows.push([]);
+        rows.push(['Red Flags']);
+        rows.push(['Name', 'Severity', 'Explanation']);
+        d.redFlags.forEach(f => rows.push([f.name, f.severity, f.explanation]));
+      }
+
+      const namePart = csvSafeFilenamePart(currentStockTicker || currentScanBizName);
+      downloadCsv(`${namePart}-apex-report-${todayDateStamp()}.csv`, rows);
+    } catch (e) {
+      console.error('Scan CSV export failed:', e);
+      alert('Could not generate the CSV — please try again.');
     }
-
-    if (Array.isArray(d.costCuts) && d.costCuts.length) {
-      rows.push([]);
-      rows.push([scanMode === 'investor' ? 'Key Risks' : 'Cost Cuts']);
-      rows.push(['Title', 'Description', 'Severity']);
-      d.costCuts.forEach(c => rows.push([c.title, c.desc, c.color === 'red' ? 'High' : c.color === 'amb' ? 'Medium' : 'Low']));
-    }
-
-    if (d.isPublicStock && Array.isArray(d.redFlags) && d.redFlags.length) {
-      rows.push([]);
-      rows.push(['Red Flags']);
-      rows.push(['Name', 'Severity', 'Explanation']);
-      d.redFlags.forEach(f => rows.push([f.name, f.severity, f.explanation]));
-    }
-
-    const namePart = csvSafeFilenamePart(currentStockTicker || currentScanBizName);
-    downloadCsv(`${namePart}-apex-report-${todayDateStamp()}.csv`, rows);
   }
 
   function drawRing(canvasId, score, greenMin, amberMin) {
