@@ -8,6 +8,9 @@ const IP_RATE_LIMIT_MAX_REQUESTS = 20; // per hour, per IP — this is an LLM-ba
                                         // auth requirement, so IP-based limiting guards the shared
                                         // Groq quota the same way /api/analyze does.
 const PORTFOLIO_NOTIFICATIONS_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
+// See lib/groqHelpers.js's OPENROUTER_TIMEOUT_MS comment — same Edge-runtime timeout budget
+// applies here, this endpoint just isn't wired through that shared helper.
+const OPENROUTER_TIMEOUT_MS = 12000;
 
 function escapeForPrompt(str) {
   return String(str ?? '').replace(/[\r\n]+/g, ' ').slice(0, 200);
@@ -270,7 +273,7 @@ export default async function handler(req) {
   // see that file's module comment for the full rationale and how the OpenRouter model was
   // chosen. Chat isn't JSON-mode (free-form reply text), so this call is built inline rather than
   // sharing that helper, but the same two providers/models and the same "only on 429" rule apply.
-  async function requestChatCompletion(url, key, model, extraBody) {
+  async function requestChatCompletion(url, key, model, extraBody, timeoutMs) {
     return fetch(url, {
       method: 'POST',
       headers: {
@@ -285,7 +288,8 @@ export default async function handler(req) {
         ],
         temperature: 0.5,
         ...extraBody
-      })
+      }),
+      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined
     });
   }
 
@@ -308,7 +312,7 @@ export default async function handler(req) {
       try {
         // gpt-oss-120b uses max_completion_tokens, not the (older) max_tokens Groq expects —
         // see lib/groqHelpers.js's comment for the model rationale.
-        const openRouterRes = await requestChatCompletion('https://openrouter.ai/api/v1/chat/completions', openRouterKey, 'openai/gpt-oss-120b', { max_completion_tokens: maxTokens });
+        const openRouterRes = await requestChatCompletion('https://openrouter.ai/api/v1/chat/completions', openRouterKey, 'openai/gpt-oss-120b', { max_completion_tokens: maxTokens }, OPENROUTER_TIMEOUT_MS);
         if (openRouterRes.ok) {
           finalRes = openRouterRes;
           console.error('OpenRouter fallback succeeded for chat — serving this response instead of Groq');
@@ -317,7 +321,8 @@ export default async function handler(req) {
           console.error('OpenRouter fallback request failed for chat:', openRouterRes.status, errText);
         }
       } catch (e) {
-        console.error('OpenRouter fallback request threw for chat:', e.message);
+        // AbortSignal.timeout() firing lands here too (a DOMException named "TimeoutError").
+        console.error(e.name === 'TimeoutError' ? `OpenRouter fallback timed out for chat after ${OPENROUTER_TIMEOUT_MS}ms` : `OpenRouter fallback request threw for chat: ${e.message}`);
       }
     } else {
       console.error('Groq rate-limited (429) on chat — OpenRouter fallback skipped: OPENROUTER_API_KEY is not set');
