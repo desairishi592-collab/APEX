@@ -476,6 +476,11 @@
     .auth-switch { font-size: 12px; color: var(--muted); text-align: center; margin-top: 14px; }
     .auth-switch a { color: var(--accent); cursor: pointer; text-decoration: none; }
     .auth-err { font-size: 12px; color: var(--red); margin-top: 8px; display: none; }
+    .auth-oauth-btn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px; margin-bottom: 10px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; color: var(--text); cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: border-color 0.15s, background 0.15s; }
+    .auth-oauth-btn:hover { border-color: var(--border-hover); background: var(--surface); }
+    .auth-oauth-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+    .auth-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
     .account-menu { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; max-width: 360px; width: 100%; }
     .account-menu .am-email { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
     .account-menu .am-status { font-size: 15px; font-weight: 500; color: var(--text); margin-bottom: 1.25rem; }
@@ -540,7 +545,7 @@
 </head>
 <body>
 <nav>
-  <a class="nav-logo" href="#">
+  <a class="nav-logo" href="#" onclick="event.preventDefault(); currentUser ? openHomePage() : show('s-connect');">
     <div class="nav-logo-mark">AX</div>
     <span class="nav-logo-text">APEX</span>
   </a>
@@ -561,6 +566,15 @@
     <div id="auth-form-view">
       <h2 id="auth-title">Log in to APEX</h2>
       <p class="auth-sub" id="auth-sub">Welcome back — pick up where you left off.</p>
+      <button type="button" class="auth-oauth-btn" onclick="signInWithOAuth('google')" id="auth-google-btn">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5h-1.9V20.4H24v7.2h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l5.1-5.1C33.6 6.1 29 4.4 24 4.4 13.2 4.4 4.4 13.2 4.4 24S13.2 43.6 24 43.6 43.6 34.8 43.6 24c0-1.2-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.8 14.5l6 4.4C14.4 15.5 18.8 12.8 24 12.8c3.1 0 5.8 1.1 8 3l5.1-5.1C33.6 6.1 29 4.4 24 4.4c-7.4 0-13.7 4.2-17.2 10.1z"/><path fill="#4CAF50" d="M24 43.6c5 0 9.5-1.9 13-5l-6-4.9c-2 1.5-4.5 2.4-7 2.4-5.2 0-9.6-3.3-11.3-8l-6 4.6C10.2 39.3 16.6 43.6 24 43.6z"/><path fill="#1976D2" d="M43.6 20.5h-1.9V20.4H24v7.2h11.3c-.8 2.3-2.2 4.3-4.1 5.7l6 4.9c-.4.4 6.8-5 6.8-14.2 0-1.2-.1-2.4-.4-3.5z"/></svg>
+        Continue with Google
+      </button>
+      <button type="button" class="auth-oauth-btn" onclick="signInWithOAuth('github')" id="auth-github-btn">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="#181717"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Continue with GitHub
+      </button>
+      <div class="auth-divider">or continue with email</div>
       <div class="auth-field">
         <label>Email</label>
         <input type="email" id="auth-email" placeholder="you@example.com" />
@@ -670,6 +684,35 @@
     <div class="history-sub">Price alerts and watchlist moves.</div>
     <div class="history-list" id="notifications-list">
       <div class="history-loading">Loading notifications…</div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: HOME — default landing screen for logged-in users, wired up from checkSession()
+     (existing session on page load) and submitAuth() (fresh login/signup with no pending
+     scan/watchlist/price-alert action to resume). Guests and logged-out visitors never route
+     here; they still land on s-connect below, which is why it keeps the static "active" class. -->
+<div class="screen" id="s-home">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Welcome back</h2>
+    </div>
+
+    <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="show('s-connect')">Get started — run a new scan →</button>
+
+    <div class="section-title">Your Watchlist</div>
+    <div class="watchlist-page-list" id="home-watchlist-list" style="margin-bottom:1.75rem;">
+      <div class="history-loading">Loading watchlist…</div>
+    </div>
+
+    <div class="section-title">Latest Alerts</div>
+    <div class="history-list" id="home-alerts-list" style="margin-bottom:1.75rem;">
+      <div class="history-loading">Loading alerts…</div>
+    </div>
+
+    <div class="section-title">Recent News</div>
+    <div id="home-news-list" style="margin-bottom:1.75rem;">
+      <div class="history-loading">Loading news…</div>
     </div>
   </div>
 </div>
@@ -1256,6 +1299,17 @@
       <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
     </div>
 
+    <!-- WATCHLIST — same data/rows as the Holdings tab's watchlist (loadWatchlistPage() targets
+         whichever list element id it's given), just surfaced here too since users look for their
+         tracked stocks from both places. -->
+    <div class="section-title">Your Watchlist</div>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
+      <button class="rescan-btn" onclick="exportWatchlistCsv()">⬇ Export CSV</button>
+    </div>
+    <div class="watchlist-page-list" id="investments-watchlist-list" style="margin-bottom:1.75rem;">
+      <div class="history-loading">Loading watchlist…</div>
+    </div>
+
     <div class="section-title">Compare Companies</div>
     <div class="dive-card" id="standalone-compare-form-card">
       <div class="dive-body">
@@ -1539,6 +1593,7 @@
     if (session) {
       currentUser = session.user;
       await loadProfile();
+      openHomePage();
     }
     renderAuthState();
   }
@@ -1599,6 +1654,7 @@
     const navAuth = document.getElementById('nav-auth');
     if (currentUser) {
       navAuth.innerHTML = `
+        <button class="nav-account-btn" onclick="openHomePage()">Home</button>
         <button class="nav-account-btn" onclick="openWatchlistPage()">Holdings</button>
         <button class="nav-account-btn nav-bell-btn" onclick="openNotifications()" id="nav-bell-btn">Alerts<span class="notif-badge" id="notif-badge" style="display:none;">0</span></button>
         <button class="nav-account-btn" onclick="openAgentPage()">📡 APEX Agent</button>
@@ -1645,6 +1701,23 @@
 
   function closeAuth() {
     document.getElementById('auth-overlay').classList.remove('active');
+  }
+
+  // OAuth providers must be enabled in the Supabase dashboard (Authentication > Providers)
+  // with a client ID/secret from Google Cloud Console / GitHub OAuth Apps before this succeeds —
+  // signInWithOAuth redirects the browser to Supabase's /authorize endpoint, which errors there
+  // (outside this page) if the provider isn't configured.
+  async function signInWithOAuth(provider) {
+    const errEl = document.getElementById('auth-err');
+    errEl.style.display = 'none';
+    const { error } = await sb.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: window.location.origin }
+    });
+    if (error) {
+      errEl.textContent = `Couldn't start ${provider === 'google' ? 'Google' : 'GitHub'} sign-in: ${error.message}`;
+      errEl.style.display = 'block';
+    }
   }
 
   function confirmGuest() {
@@ -1730,6 +1803,10 @@
         pendingProUpgrade = false;
       }
 
+      // Captured before any of the flags below get reset by their own resume branch — used
+      // just after to decide whether to land on the Home dashboard.
+      const hadPendingAction = pendingScanAfterAuth || pendingWatchlistSave || pendingPriceAlertSave;
+
       // If they tried to scan before they were logged in, finish that scan for them now
       // instead of making them click "Run scan" a second time.
       if (pendingScanAfterAuth) {
@@ -1752,6 +1829,14 @@
       if (pendingPriceAlertSave) {
         pendingPriceAlertSave = false;
         showPriceAlertForm();
+      }
+
+      // A fresh login/signup with nothing else to resume lands on the Home dashboard, not
+      // wherever the auth modal happened to be opened from — Home is the landing page after
+      // auth, not the scan form. Skipped when a pending action above already navigated
+      // somewhere purposeful (mid-scan, etc).
+      if (!hadPendingAction) {
+        openHomePage();
       }
     } catch (e) {
       let msg = 'Something went wrong. Please try again.';
@@ -2055,8 +2140,11 @@
   // Renders the saved rows immediately (so the page isn't blank while prices load), then
   // fetches live quotes in one batched request and patches price/change into each row —
   // avoids a separate Finnhub round-trip per ticker from the client.
-  async function loadWatchlistPage() {
-    const listEl = document.getElementById('watchlist-page-list');
+  // `listElId` lets both the Holdings tab's watchlist list and the Investments screen's
+  // watchlist list (same underlying data) share this one fetch/render path instead of
+  // duplicating it — defaults to the original Holdings list so existing call sites are unchanged.
+  async function loadWatchlistPage(listElId) {
+    const listEl = document.getElementById(listElId || 'watchlist-page-list');
     listEl.innerHTML = '<div class="history-loading">Loading watchlist…</div>';
     watchlistExportRows = [];
 
@@ -2122,7 +2210,10 @@
     downloadCsv(`apex-watchlist-${todayDateStamp()}.csv`, rows);
   }
 
-  function renderWatchlistRow(w, quote) {
+  // `opts.readOnly` drops the remove button — used by the Home dashboard preview, whose combined
+  // watchlist+portfolio rows may not even live in the `watchlist` table (see loadHomeWatchlist()),
+  // so a "remove" affordance there could silently no-op or mislead the user about what it does.
+  function renderWatchlistRow(w, quote, opts) {
     const ticker = escapeHtml(w.ticker || '');
     const companyName = escapeHtml(w.company_name || w.ticker || '');
     let priceHtml = '<span style="color:var(--muted);">—</span>';
@@ -2136,6 +2227,9 @@
         changeHtml = `<div class="watchlist-change ${dir}">${arrow} ${sign}${quote.change.toFixed(2)} (${sign}${quote.percentChange.toFixed(2)}%)</div>`;
       }
     }
+    const removeBtn = (opts && opts.readOnly)
+      ? ''
+      : `<button class="watchlist-remove-btn" data-ticker="${ticker}" onclick="removeFromWatchlistBtn(this)" title="Remove">✕</button>`;
     return `
       <div class="watchlist-item">
         <div class="watchlist-info">
@@ -2146,15 +2240,15 @@
           <div class="watchlist-price">${priceHtml}</div>
           ${changeHtml}
         </div>
-        <button class="watchlist-remove-btn" data-ticker="${ticker}" onclick="removeFromWatchlistBtn(this)" title="Remove">✕</button>
+        ${removeBtn}
       </div>`;
   }
 
-  async function removeFromWatchlist(ticker) {
+  async function removeFromWatchlist(ticker, listElId) {
     if (!currentUser) return;
     try {
       await sb.from('watchlist').delete().eq('user_id', currentUser.id).eq('ticker', ticker);
-      loadWatchlistPage();
+      loadWatchlistPage(listElId);
     } catch (e) {
       // Non-fatal: leave the list as-is, user can retry
     }
@@ -2162,9 +2256,123 @@
 
   // Reads the ticker via .dataset (a real DOM property read, not a re-parsed inline string) so
   // there's no risk of a quote character in the ticker breaking out of a JS string literal
-  // embedded in an onclick="..." attribute.
+  // embedded in an onclick="..." attribute. Also walks up to whichever watchlist list this row
+  // is actually rendered in (Holdings or Investments — both share .watchlist-page-list) so the
+  // reload after removal refreshes the list the user is actually looking at.
   function removeFromWatchlistBtn(btn) {
-    removeFromWatchlist(btn.dataset.ticker);
+    const container = btn.closest('.watchlist-page-list');
+    removeFromWatchlist(btn.dataset.ticker, container ? container.id : undefined);
+  }
+
+  // ── HOME DASHBOARD ── (default landing screen for logged-in users, see openHomePage() below)
+  const HOME_WATCHLIST_LIMIT = 6;
+  const HOME_NEWS_TICKER_LIMIT = 3; // capped: /api/news makes 2 Groq calls per ticker
+  const HOME_NEWS_ITEM_LIMIT = 5;
+
+  // Combined watchlist + portfolio preview, same dedup-by-ticker principle loadSectorBreakdown()
+  // already uses for this pairing (a stock tracked in both counts once, watchlist entry wins on
+  // conflict since it's queried first). Returns the tickers shown so loadHomeNews() can reuse
+  // them without a second round-trip to figure out what's on the dashboard.
+  async function loadHomeWatchlist() {
+    const listEl = document.getElementById('home-watchlist-list');
+    if (!listEl) return [];
+    listEl.innerHTML = '<div class="history-loading">Loading watchlist…</div>';
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your watchlist.</div>';
+      return [];
+    }
+
+    let rows;
+    try {
+      const [wl, pf] = await Promise.all([
+        sb.from('watchlist').select('ticker, company_name, score, safety_score, signal, created_at').eq('user_id', currentUser.id).order('created_at', { ascending: false }),
+        sb.from('portfolio_holdings').select('ticker, company_name, score, safety_score, signal, created_at').eq('user_id', currentUser.id).order('created_at', { ascending: false })
+      ]);
+      if (wl.error) throw wl.error;
+      if (pf.error) throw pf.error;
+
+      const map = new Map();
+      for (const r of [...(wl.data || []), ...(pf.data || [])]) {
+        if (!map.has(r.ticker)) map.set(r.ticker, r);
+      }
+      rows = [...map.values()].slice(0, HOME_WATCHLIST_LIMIT);
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your watchlist. Please try again.</div>';
+      return [];
+    }
+
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="history-empty">No stocks tracked yet — scan one and save it to your watchlist to see it here.</div>';
+      return [];
+    }
+
+    listEl.innerHTML = rows.map(w => renderWatchlistRow(w, null, { readOnly: true })).join('');
+
+    try {
+      const tickers = [...new Set(rows.map(r => r.ticker))];
+      const res = await fetch(`/api/watchlist-quotes?tickers=${encodeURIComponent(tickers.join(','))}`);
+      const data = await res.json();
+      if (res.ok && data.quotes) {
+        listEl.innerHTML = rows.map(w => renderWatchlistRow(w, data.quotes[w.ticker] || null, { readOnly: true })).join('');
+      }
+    } catch (e) {
+      // Non-fatal: rows already rendered without live prices, just leave them as "—"
+    }
+
+    return rows.map(r => r.ticker);
+  }
+
+  // renderNewsRow() (defined further below, with the rest of the news feed code) doesn't label
+  // which ticker a headline is about — fine on the single-stock report it was built for, but
+  // Home's feed spans multiple tickers, so this wraps it with a ticker label prepended.
+  function renderHomeNewsRow(item) {
+    return `<div style="font-size:11px; font-family:var(--mono); color:var(--muted); margin-bottom:2px;">${escapeHtml(item.ticker || '')}</div>${renderNewsRow(item)}`;
+  }
+
+  async function loadHomeNews(tickers) {
+    const listEl = document.getElementById('home-news-list');
+    if (!listEl) return;
+    if (!tickers || !tickers.length) {
+      listEl.innerHTML = '<div class="history-empty">Add stocks to your watchlist to see recent news here.</div>';
+      return;
+    }
+    listEl.innerHTML = '<div class="history-loading">Loading news…</div>';
+
+    try {
+      const perTicker = await Promise.all(tickers.slice(0, HOME_NEWS_TICKER_LIMIT).map(async ticker => {
+        try {
+          const res = await fetch('/api/news', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticker })
+          });
+          if (!res.ok) return [];
+          const data = await res.json();
+          return (data.news || []).map(n => ({ ...n, ticker }));
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      const merged = perTicker.flat()
+        .filter(n => n.datetime)
+        .sort((a, b) => new Date(b.datetime) - new Date(a.datetime))
+        .slice(0, HOME_NEWS_ITEM_LIMIT);
+
+      if (!merged.length) {
+        listEl.innerHTML = '<div class="history-empty">No recent news for your watchlist stocks.</div>';
+        return;
+      }
+      listEl.innerHTML = merged.map(renderHomeNewsRow).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load news right now.</div>';
+    }
+  }
+
+  function openHomePage() {
+    show('s-home');
+    loadHomeWatchlist().then(tickers => loadHomeNews(tickers));
+    loadHomeAlerts();
   }
 
   // ── PRICE ALERTS ("Wait for it") ──
@@ -2458,6 +2666,37 @@
   // triggered threshold. Price alerts and watchlist-move notifications still show in the general
   // bell panel, not here — this feed is specifically "what did the agent notice/report about my
   // holdings' health."
+  const AGENT_ALERT_TYPES = ['score_change', 'red_flag', 'red_flag_pattern', 'weekly_digest', 'earnings_upcoming', 'concentration_risk', 'watch_condition'];
+
+  // Shared by the Agent page's own feed and the Home dashboard's "Latest Alerts" preview
+  // (loadHomeAlerts() below) — same query, just a different `limit`.
+  async function fetchAgentAlerts(limit) {
+    const { data, error } = await sb
+      .from('notifications')
+      .select('id, type, ticker, company_name, title, body, read, created_at')
+      .eq('user_id', currentUser.id)
+      .in('type', AGENT_ALERT_TYPES)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data || [];
+  }
+
+  function renderAgentAlertRow(n) {
+    const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const title = escapeHtml(n.title);
+    const body = escapeHtml(n.body);
+    const stripeColor = n.type === 'red_flag' || n.type === 'red_flag_pattern' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : n.type === 'watch_condition' ? 'var(--accent)' : 'var(--accent-2)';
+    const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
+    return `
+      <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">
+        <div class="history-info">
+          <div class="history-biz">${unreadDot}${title}</div>
+          <div class="history-meta">${body} · ${date}</div>
+        </div>
+      </div>`;
+  }
+
   async function loadAgentAlerts() {
     const listEl = document.getElementById('agent-alerts-list');
     listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
@@ -2467,37 +2706,40 @@
     }
 
     try {
-      const { data, error } = await sb
-        .from('notifications')
-        .select('id, type, ticker, company_name, title, body, read, created_at')
-        .eq('user_id', currentUser.id)
-        .in('type', ['score_change', 'red_flag', 'red_flag_pattern', 'weekly_digest', 'earnings_upcoming', 'concentration_risk', 'watch_condition'])
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
-
-      const rows = data || [];
+      const rows = await fetchAgentAlerts(50);
       if (!rows.length) {
         listEl.innerHTML = '<div class="history-empty">No alerts yet — add tickers to your watchlist or portfolio and APEX Agent will start watching them. Score/red-flag/earnings checks run daily, portfolio digests run weekly.</div>';
         return;
       }
 
-      listEl.innerHTML = rows.map(n => {
-        const date = new Date(n.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        const title = escapeHtml(n.title);
-        const body = escapeHtml(n.body);
-        const stripeColor = n.type === 'red_flag' || n.type === 'red_flag_pattern' ? 'var(--red)' : n.type === 'weekly_digest' ? 'var(--accent)' : n.type === 'earnings_upcoming' ? 'var(--amber)' : n.type === 'watch_condition' ? 'var(--accent)' : 'var(--accent-2)';
-        const unreadDot = n.read ? '' : '<span style="width:8px;height:8px;border-radius:50%;background:var(--accent);display:inline-block;margin-right:6px;"></span>';
-        return `
-          <div class="history-item" style="cursor:default; border-left:3px solid ${stripeColor}; padding-left:11px;">
-            <div class="history-info">
-              <div class="history-biz">${unreadDot}${title}</div>
-              <div class="history-meta">${body} · ${date}</div>
-            </div>
-          </div>`;
-      }).join('');
-
+      listEl.innerHTML = rows.map(renderAgentAlertRow).join('');
       await markVisibleNotificationsRead(rows);
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your alerts. Please try again.</div>';
+    }
+  }
+
+  const HOME_ALERTS_LIMIT = 5;
+
+  // Home's "Latest Alerts" preview deliberately does NOT mark these read (unlike the bell panel
+  // and the Agent page above) — the bell badge should still reflect unseen alerts after a user
+  // just glances at the dashboard, not clear until they actually open one of those dedicated views.
+  async function loadHomeAlerts() {
+    const listEl = document.getElementById('home-alerts-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="history-loading">Loading alerts…</div>';
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your alerts.</div>';
+      return;
+    }
+
+    try {
+      const rows = await fetchAgentAlerts(HOME_ALERTS_LIMIT);
+      if (!rows.length) {
+        listEl.innerHTML = '<div class="history-empty">No alerts yet — save a stock to your watchlist and APEX Agent will start watching it.</div>';
+        return;
+      }
+      listEl.innerHTML = rows.map(renderAgentAlertRow).join('');
     } catch (e) {
       listEl.innerHTML = '<div class="history-empty">Couldn\'t load your alerts. Please try again.</div>';
     }
@@ -2752,6 +2994,7 @@
     const params = new URLSearchParams(window.location.search);
     const urlMode = params.get('mode');
     const urlPlan = params.get('plan');
+    const urlAuth = params.get('auth');
 
     if (urlMode === 'investor') {
       setMode('investor');
@@ -2762,6 +3005,11 @@
     if (urlPlan === 'pro') {
       pendingProUpgrade = true;
       openAuth('signup');
+    } else if (urlAuth === 'login' || urlAuth === 'signup') {
+      // Landing page's Login/Sign up buttons deep-link here with ?auth=login|signup so the
+      // modal opens immediately — the account created (or logged into) is a real APEX account
+      // on this app's own origin, so there's no separate landing-page account to bridge.
+      openAuth(urlAuth);
     }
   }
 
@@ -2838,22 +3086,29 @@
       document.getElementById(id).style.borderColor = '';
     });
 
-    const missing = [];
-    if (!bizName) { missing.push('biz-name'); }
-    if (!industry) { missing.push('biz-industry'); }
-    if (!revenue) { missing.push('biz-revenue'); }
-    if (!expenses) { missing.push('biz-expenses'); }
-    if (!employees) { missing.push('biz-employees'); }
-    if (!age) { missing.push('biz-age'); }
+    // A file upload gives APEX real data to work from, so the manual fields become optional —
+    // only enforce them when there's no file to fall back on. Either source is enough; only
+    // block the scan if there's genuinely nothing to analyze.
+    const hasFile = !!fileContent;
 
-    if (missing.length > 0) {
-      missing.forEach(id => {
-        document.getElementById(id).style.borderColor = '#c92b25';
-      });
-      const err = document.getElementById('err-box');
-      err.textContent = '⚠ Please fill in all fields before running the scan — business name, industry, monthly revenue, monthly expenses, number of employees, and years in business are all required.';
-      err.style.display = 'block';
-      return;
+    if (!hasFile) {
+      const missing = [];
+      if (!bizName) { missing.push('biz-name'); }
+      if (!industry) { missing.push('biz-industry'); }
+      if (!revenue) { missing.push('biz-revenue'); }
+      if (!expenses) { missing.push('biz-expenses'); }
+      if (!employees) { missing.push('biz-employees'); }
+      if (!age) { missing.push('biz-age'); }
+
+      if (missing.length > 0) {
+        missing.forEach(id => {
+          document.getElementById(id).style.borderColor = '#c92b25';
+        });
+        const err = document.getElementById('err-box');
+        err.textContent = '⚠ Please fill in all fields before running the scan — business name, industry, monthly revenue, monthly expenses, number of employees, and years in business are all required.';
+        err.style.display = 'block';
+        return;
+      }
     }
 
     show('s-loading');
@@ -3431,6 +3686,7 @@
     document.getElementById('standalone-compare-result-area').style.display = 'none';
     document.getElementById('standalone-compare-result-area').innerHTML = '';
     document.getElementById('standalone-compare-err').style.display = 'none';
+    loadWatchlistPage('investments-watchlist-list');
   }
 
   function selectStandaloneCompareTicker(contextId, symbol, description) {
