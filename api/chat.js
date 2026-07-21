@@ -9,8 +9,9 @@ const IP_RATE_LIMIT_MAX_REQUESTS = 20; // per hour, per IP — this is an LLM-ba
                                         // Groq quota the same way /api/analyze does.
 const PORTFOLIO_NOTIFICATIONS_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 // See lib/groqHelpers.js's OPENROUTER_TIMEOUT_MS comment — same Edge-runtime timeout budget
-// applies here, this endpoint just isn't wired through that shared helper.
-const OPENROUTER_TIMEOUT_MS = 12000;
+// (and same 12000ms -> 20000ms bump after production logs showed 12s wasn't enough) applies
+// here, this endpoint just isn't wired through that shared helper.
+const OPENROUTER_TIMEOUT_MS = 20000;
 
 function escapeForPrompt(str) {
   return String(str ?? '').replace(/[\r\n]+/g, ' ').slice(0, 200);
