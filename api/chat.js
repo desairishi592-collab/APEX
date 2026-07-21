@@ -267,9 +267,9 @@ export default async function handler(req) {
   const maxTokens = isDraftAction ? DRAFT_PROMPTS[action].maxTokens : 320;
 
   // FALLBACK PROVIDER: same rate-limit-only fallback as lib/groqHelpers.js's callGroqForJson —
-  // see that file's module comment for the full rationale and how the Cerebras model was chosen.
-  // Chat isn't JSON-mode (free-form reply text), so this call is built inline rather than sharing
-  // that helper, but the same two providers/models and the same "only on 429" rule apply.
+  // see that file's module comment for the full rationale and how the OpenRouter model was
+  // chosen. Chat isn't JSON-mode (free-form reply text), so this call is built inline rather than
+  // sharing that helper, but the same two providers/models and the same "only on 429" rule apply.
   async function requestChatCompletion(url, key, model, extraBody) {
     return fetch(url, {
       method: 'POST',
@@ -302,23 +302,25 @@ export default async function handler(req) {
   let finalRes = groqRes;
 
   if (groqRes.status === 429) {
-    const cerebrasKey = process.env.CEREBRAS_API_KEY;
-    if (cerebrasKey) {
-      console.error('Groq rate-limited (429) on chat — attempting Cerebras fallback');
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    if (openRouterKey) {
+      console.error('Groq rate-limited (429) on chat — attempting OpenRouter fallback');
       try {
         // gpt-oss-120b uses max_completion_tokens, not the (older) max_tokens Groq expects —
-        // confirmed against Cerebras's live model catalog, see lib/groqHelpers.js's comment.
-        const cerebrasRes = await requestChatCompletion('https://api.cerebras.ai/v1/chat/completions', cerebrasKey, 'gpt-oss-120b', { max_completion_tokens: maxTokens });
-        if (cerebrasRes.ok) {
-          finalRes = cerebrasRes;
-          console.error('Cerebras fallback succeeded for chat — serving this response instead of Groq');
+        // see lib/groqHelpers.js's comment for the model rationale.
+        const openRouterRes = await requestChatCompletion('https://openrouter.ai/api/v1/chat/completions', openRouterKey, 'openai/gpt-oss-120b', { max_completion_tokens: maxTokens });
+        if (openRouterRes.ok) {
+          finalRes = openRouterRes;
+          console.error('OpenRouter fallback succeeded for chat — serving this response instead of Groq');
         } else {
-          const errText = await cerebrasRes.text().catch(() => '');
-          console.error('Cerebras fallback request failed for chat:', cerebrasRes.status, errText);
+          const errText = await openRouterRes.text().catch(() => '');
+          console.error('OpenRouter fallback request failed for chat:', openRouterRes.status, errText);
         }
       } catch (e) {
-        console.error('Cerebras fallback request threw for chat:', e.message);
+        console.error('OpenRouter fallback request threw for chat:', e.message);
       }
+    } else {
+      console.error('Groq rate-limited (429) on chat — OpenRouter fallback skipped: OPENROUTER_API_KEY is not set');
     }
   }
 

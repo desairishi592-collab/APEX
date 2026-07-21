@@ -361,7 +361,7 @@ export default async function handler(req) {
       console.error('Portfolio digest data aggregation failed for user', user.id, e.message);
     }
 
-    // ── 5. Narrative synthesis: ONE Groq call (lib/portfolioDigest.js, same Groq→Cerebras
+    // ── 5. Narrative synthesis: ONE Groq call (lib/portfolioDigest.js, same Groq→OpenRouter
     // fallback as the rest of APEX Agent) weaves ALL of the above — score trend, signal changes,
     // triggered alerts, movers, red flags, earnings, sector comparison — into a short, connected
     // "week in review," replacing what used to be three separate raw bullet sections plus one
