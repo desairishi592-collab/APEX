@@ -541,6 +541,16 @@
     .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes bounce { 0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; } 40% { transform: scale(1.2); opacity: 1; } }
     @keyframes bubblePop { from { opacity: 0; transform: scale(0.8) translateY(6px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+    /* PDF EXPORT: exportPdf()'s html2pdf pagebreak mode reads these (see the 'css' mode) to
+       decide which elements must not be split across a page boundary — scoped to just the
+       report's actual atomic blocks (cards and individual rows), not every element on the page.
+       Has no effect on normal on-screen rendering; only consulted by the pagebreak plugin. */
+    .score-card, .dive-card, .card, .payroll-safety-card, .simulator-card,
+    .metric, .dive-row, .dive-row-block, .percentile-row, .news-row, .red-flag-row, .risk-timeline-item {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
   </style>
 </head>
 <body>
@@ -4952,6 +4962,14 @@
     btn.disabled = true;
     btn.textContent = 'Generating PDF…';
     try {
+      // The export button sits near the bottom of the report, so by the time someone clicks it
+      // they've almost always scrolled down to reach it — and html2canvas captures relative to
+      // the page's CURRENT scroll position unless told otherwise, not just the target element's
+      // own bounds. Left as-is, that scroll offset shows up as a blank gap at the top of page 1
+      // and shifts every page's content down by roughly that much, which is what was actually
+      // producing the reported clipped/cut-off content on later pages. scrollX/scrollY: 0 tells
+      // html2canvas to capture as if scrolled to the top regardless of where the user actually
+      // is, which is more robust than a bare window.scrollTo() + hoping the timing works out.
       const safeName = (currentScanBizName || currentStockTicker || 'apex-report')
         .toString().trim().replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'apex-report';
       await window.html2pdf().set({
@@ -4960,9 +4978,17 @@
         image: { type: 'jpeg', quality: 0.95 },
         // Excludes .no-print elements (action buttons, the "Pro Coming Soon" banner) from the
         // capture — they're page chrome, not part of the report itself.
-        html2canvas: { scale: 2, backgroundColor: '#ffffff', ignoreElements: (el) => el.classList.contains('no-print') },
+        html2canvas: { scale: 2, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0, ignoreElements: (el) => el.classList.contains('no-print') },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        // 'avoid-all' (removed) tells html2pdf's pagebreak plugin to protect EVERY element in the
+        // report from a mid-element split, not just cards/rows — on a long report that's dozens
+        // of nested spans/divs each potentially inserting their own page-filling padding div, and
+        // those paddings compound into blank pages and mis-sliced page images (confirmed via a
+        // real generated PDF: every page ended up referencing the same embedded image XObjects).
+        // 'css' mode reads real page-break-inside/break-inside CSS instead, which is now scoped
+        // to just the actual atomic blocks (see the .score-card/.dive-card/... rule above), so
+        // only those are protected and the rest of the report paginates normally.
+        pagebreak: { mode: ['css', 'legacy'] }
       }).from(target).save();
     } catch (e) {
       console.error('PDF export failed:', e);
