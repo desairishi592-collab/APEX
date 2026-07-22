@@ -12,6 +12,10 @@ const PORTFOLIO_NOTIFICATIONS_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 // (and same 12000ms -> 20000ms bump after production logs showed 12s wasn't enough) applies
 // here, this endpoint just isn't wired through that shared helper.
 const OPENROUTER_TIMEOUT_MS = 20000;
+// See lib/groqHelpers.js's OPENROUTER_PROVIDER_PREFERENCE comment — pins gpt-oss-120b to
+// Cerebras's backend specifically, since default OpenRouter routing was landing on backends
+// well under Cerebras's ~1,667 tok/s for this model.
+const OPENROUTER_PROVIDER_PREFERENCE = { order: ['cerebras'], allow_fallbacks: true };
 
 function escapeForPrompt(str) {
   return String(str ?? '').replace(/[\r\n]+/g, ' ').slice(0, 200);
@@ -313,7 +317,7 @@ export default async function handler(req) {
       try {
         // gpt-oss-120b uses max_completion_tokens, not the (older) max_tokens Groq expects —
         // see lib/groqHelpers.js's comment for the model rationale.
-        const openRouterRes = await requestChatCompletion('https://openrouter.ai/api/v1/chat/completions', openRouterKey, 'openai/gpt-oss-120b', { max_completion_tokens: maxTokens }, OPENROUTER_TIMEOUT_MS);
+        const openRouterRes = await requestChatCompletion('https://openrouter.ai/api/v1/chat/completions', openRouterKey, 'openai/gpt-oss-120b', { max_completion_tokens: maxTokens, provider: OPENROUTER_PROVIDER_PREFERENCE }, OPENROUTER_TIMEOUT_MS);
         if (openRouterRes.ok) {
           finalRes = openRouterRes;
           console.error('OpenRouter fallback succeeded for chat — serving this response instead of Groq');
