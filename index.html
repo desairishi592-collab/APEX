@@ -737,7 +737,7 @@
     </div>
 
     <div id="home-investor-view">
-      <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="show('s-connect')">Get started — run a new scan →</button>
+      <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="goToScanFromHome('investor')">Get started — run a new scan →</button>
 
       <div class="section-title">Your Watchlist</div>
       <div class="watchlist-page-list" id="home-watchlist-list" style="margin-bottom:1.75rem;">
@@ -756,7 +756,7 @@
     </div>
 
     <div id="home-business-view" style="display:none;">
-      <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="setMode('owner'); show('s-connect');">Run a new business scan →</button>
+      <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="goToScanFromHome('owner')">Run a new business scan →</button>
 
       <div class="section-title">Your Businesses</div>
       <div id="home-business-list" style="margin-bottom:1.75rem;">
@@ -779,10 +779,11 @@
       <p id="hero-sub">APEX scans your revenue, expenses, and team size to give you a health score, what's safe to pay your employees, and exactly where to cut costs — powered by AI, in seconds.</p>
     </div>
 
-    <!-- INVESTOR-ONLY sub-toggle: private business vs public stock -->
+    <!-- INVESTOR-ONLY sub-toggle: private business vs public stock vs nonprofit -->
     <div class="mode-toggle" id="investor-subtoggle" style="display:none;">
       <button class="mode-btn active" id="submode-btn-private" onclick="setInvestorSubMode('private')">Private business</button>
       <button class="mode-btn" id="submode-btn-public" onclick="setInvestorSubMode('public')">Public stock</button>
+      <button class="mode-btn" id="submode-btn-nonprofit" onclick="setInvestorSubMode('nonprofit')">Nonprofit</button>
     </div>
 
     <!-- PRIVATE BUSINESS / OWNER FORM -->
@@ -844,6 +845,18 @@
       </div>
       <button class="btn btn-accent btn-full" onclick="runStockScan()" id="run-stock-btn" style="margin-top:1rem;">Run safety scan →</button>
       <div class="err" id="stock-err-box"></div>
+    </div>
+
+    <!-- NONPROFIT FORM (investor mode only) — routes straight into the guided nonprofit intake
+         screen (s-guided-intake-nonprofit); no bank-statement upload path since bank statements
+         don't map cleanly onto program vs. admin expense splits, funding source breakdowns, etc. -->
+    <div id="form-nonprofit" style="display:none;">
+      <span class="biz-label">Tell APEX about the nonprofit you're evaluating</span>
+      <div class="drop-zone drop-zone-alt" onclick="openGuidedIntakeNonprofit()">
+        <span class="drop-icon">📝</span>
+        <div class="drop-title">Answer a guided form about the organization</div>
+        <div class="drop-sub">Funding, expenses, program ratio, reserves — no bank login, ~2 minutes</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1127,7 +1140,7 @@
 
     <div class="dive-card" id="r-industry-card">
       <div class="dive-body">
-        <div class="section-title">How you compare to similar businesses</div>
+        <div class="section-title" id="r-industry-title">How you compare to similar businesses</div>
         <div id="r-sector-note" style="display:none; font-size:12px; color:var(--muted); margin:-4px 0 10px;"></div>
         <div id="r-industry-rows"></div>
       </div>
@@ -1441,6 +1454,80 @@
   </div>
 </div>
 
+<!-- SCREEN: GUIDED NONPROFIT INTAKE — same UI/flow as s-guided-intake above, fields swapped for
+     nonprofit-appropriate ones (funding sources, program/admin expense split, reserves, donor
+     count) instead of for-profit revenue/payroll/debt. -->
+<div class="screen" id="s-guided-intake-nonprofit">
+  <div class="results-wrap">
+    <div class="results-header">
+      <h2>Guided nonprofit report</h2>
+      <button class="rescan-btn" onclick="show('s-connect')">← Back</button>
+    </div>
+
+    <div class="err" id="gin-privacy-note" style="display:block; background: var(--green-dim); border-color: rgba(21,131,122,0.25); color: var(--green);">
+      ✓ No bank login or account numbers are ever requested here — just the numbers you type in below.
+      If you're logged in, the resulting report is saved to your scan history like any other scan;
+      as a guest, it's a one-time report that isn't stored anywhere.
+    </div>
+
+    <span class="biz-label">Tell APEX about the organization</span>
+    <div class="biz-grid">
+      <input type="text" id="gin-org-name" placeholder="Organization name (optional)" />
+      <select id="gin-cause">
+        <option value="">Mission area / cause type</option>
+        <option>Education</option>
+        <option>Health &amp; Human Services</option>
+        <option>Arts &amp; Culture</option>
+        <option>Environment &amp; Animal Welfare</option>
+        <option>Religious</option>
+        <option>International / Humanitarian Aid</option>
+        <option>Community Development</option>
+        <option>Youth &amp; Family Services</option>
+        <option>Research &amp; Public Policy</option>
+        <option>Other</option>
+      </select>
+      <input type="text" id="gin-staff-paid" placeholder="Paid staff count" />
+      <input type="text" id="gin-staff-volunteer" placeholder="Volunteer count (optional, if tracked separately)" />
+      <input type="text" id="gin-age" placeholder="Years operating" />
+    </div>
+
+    <span class="biz-label">Monthly funding sources (can be a simple total or broken down)</span>
+    <div class="biz-grid">
+      <input type="text" id="gin-fund-total" placeholder="Total monthly funding ($, required)" oninput="updateGuidedNonprofitTotals()" />
+      <input type="text" id="gin-fund-donations" placeholder="Of which donations ($, optional)" />
+      <input type="text" id="gin-fund-grants" placeholder="Of which grants ($, optional)" />
+      <input type="text" id="gin-fund-events" placeholder="Of which fundraising events ($, optional)" />
+    </div>
+
+    <span class="biz-label">Monthly expenses</span>
+    <div class="biz-grid">
+      <input type="text" id="gin-exp-total" placeholder="Total monthly expenses ($, required)" oninput="updateGuidedNonprofitTotals()" />
+      <input type="text" id="gin-exp-program" placeholder="Of which program/mission expenses ($, optional)" oninput="updateGuidedNonprofitTotals()" />
+      <input type="text" id="gin-exp-admin" placeholder="Of which admin/overhead expenses ($, optional)" oninput="updateGuidedNonprofitTotals()" />
+    </div>
+
+    <span class="biz-label">Reserves &amp; donors</span>
+    <div class="biz-grid">
+      <input type="text" id="gin-reserves" placeholder="Cash reserves / reserve fund balance ($, optional)" />
+      <input type="text" id="gin-donor-count" placeholder="Recurring monthly donor count (optional)" />
+    </div>
+
+    <div class="dive-row-block" style="margin: 14px 0; padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);">
+      <div class="dive-row">
+        <span class="dr-label">Estimated monthly surplus/deficit (funding − expenses)</span>
+        <span class="dr-val" id="gin-surplus-display">—</span>
+      </div>
+      <div class="dive-row" style="border-bottom: none; padding-bottom: 0;">
+        <span class="dr-label">Program expense ratio (program ÷ program + admin)</span>
+        <span class="dr-val" id="gin-ratio-display">—</span>
+      </div>
+    </div>
+
+    <button class="btn btn-accent btn-full" onclick="runGuidedIntakeNonprofitScan()" id="gin-run-btn">Generate report →</button>
+    <div class="err" id="gin-err-box"></div>
+  </div>
+</div>
+
 <!-- SCREEN: INVESTMENTS — Compare nested as a section. Relocated from the former standalone
      s-compare screen per the nav restructure — every element id and onclick handler below is
      byte-for-byte the same as before, only the screen wrapper changed. -->
@@ -1538,6 +1625,8 @@
   let previewPro = false;
   let lastScanLimitHitAt = null;
   let scanMode = 'owner'; // 'owner' | 'investor'
+  let scanModeLock = null; // null | 'owner' | 'investor' — set when the scan page is entered from a
+  // specific Home View (Business/Investor), so its toggle only offers that one mode instead of both
   let pendingScanAfterAuth = false;
   let pendingWatchlistSave = false;
   let pendingPriceAlertSave = false;
@@ -1711,7 +1800,28 @@
     }
   };
 
-  let investorSubMode = 'private'; // 'private' | 'public'
+  // Copy override for nonprofit scans (d.isNonprofit, set server-side) — nonprofit scans run
+  // under the investor top-level mode (accessed via its Nonprofit sub-toggle), so scanMode itself
+  // stays 'investor'; this swaps just the report-facing language to fit nonprofit context instead
+  // of the investor-in-a-for-profit-business framing MODE_COPY.investor uses.
+  const NONPROFIT_COPY = {
+    resultsTitle: "Nonprofit health report",
+    topCutLabel: "Biggest opportunity:",
+    payTitle: "Staff pay vs. nonprofit benchmarks",
+    cutTitle: "Full recommendations breakdown",
+    pwTitle: "Unlock the full nonprofit analysis",
+    pwSub: "Your health score, key metrics, and top opportunity are free. Pro shows you everything else.",
+    pwFeatures: [
+      "Staff pay vs. nonprofit sector benchmarks",
+      "How this org compares to similar nonprofits in its cause area",
+      "Full prioritized list of recommendations, not just the top one",
+      "Health score trend over time, if you check back in",
+      "PDF export to share with your board or funders",
+      "Unlimited scans, no waiting"
+    ]
+  };
+
+  let investorSubMode = 'private'; // 'private' | 'public' | 'nonprofit'
 
   function setMode(mode) {
     scanMode = mode;
@@ -1727,6 +1837,9 @@
 
     document.getElementById('investor-subtoggle').style.display = mode === 'investor' ? 'flex' : 'none';
 
+    document.getElementById('mode-btn-owner').style.display = scanModeLock === 'investor' ? 'none' : '';
+    document.getElementById('mode-btn-investor').style.display = scanModeLock === 'owner' ? 'none' : '';
+
     if (mode === 'owner') {
       // Owner mode always uses the private business form
       setInvestorSubMode('private');
@@ -1735,14 +1848,26 @@
     }
   }
 
+  // Entry point for the two "run a scan" buttons on the Home screen — locks the scan page's
+  // top-level toggle to the mode matching whichever Home View (Business/Investor) sent the user
+  // here, instead of leaving both options visible regardless of context.
+  function goToScanFromHome(mode) {
+    scanModeLock = mode;
+    setMode(mode);
+    show('s-connect');
+  }
+
   function setInvestorSubMode(sub) {
     investorSubMode = sub;
     document.getElementById('submode-btn-private').classList.toggle('active', sub === 'private');
     document.getElementById('submode-btn-public').classList.toggle('active', sub === 'public');
+    document.getElementById('submode-btn-nonprofit').classList.toggle('active', sub === 'nonprofit');
 
     const showPublicForm = (scanMode === 'investor' && sub === 'public');
-    document.getElementById('form-private').style.display = showPublicForm ? 'none' : 'block';
+    const showNonprofitForm = (scanMode === 'investor' && sub === 'nonprofit');
+    document.getElementById('form-private').style.display = (showPublicForm || showNonprofitForm) ? 'none' : 'block';
     document.getElementById('form-public').style.display = showPublicForm ? 'block' : 'none';
+    document.getElementById('form-nonprofit').style.display = showNonprofitForm ? 'block' : 'none';
   }
 
   async function checkSession() {
@@ -2711,8 +2836,7 @@
   }
 
   function rescanBusiness() {
-    setMode('owner');
-    show('s-connect');
+    goToScanFromHome('owner');
   }
 
   // ── PRICE ALERTS ("Wait for it") ──
@@ -3675,6 +3799,146 @@
     } catch (e) {
       show('s-guided-intake');
       const err = document.getElementById('gi-err-box');
+      err.textContent = 'Something went wrong: ' + e.message;
+      err.style.display = 'block';
+    }
+  }
+
+  // ── GUIDED NONPROFIT INTAKE ── (same flow as the guided financial intake above, nonprofit
+  // fields instead of for-profit ones — reachable only via investor mode's Nonprofit sub-toggle)
+  function openGuidedIntakeNonprofit() {
+    show('s-guided-intake-nonprofit');
+  }
+
+  function updateGuidedNonprofitTotals() {
+    const funding = parseGuidedNum('gin-fund-total');
+    const expenses = parseGuidedNum('gin-exp-total');
+    const surplusEl = document.getElementById('gin-surplus-display');
+    if (funding == null || expenses == null) {
+      surplusEl.textContent = '—';
+      surplusEl.className = 'dr-val';
+    } else {
+      const surplus = funding - expenses;
+      surplusEl.textContent = (surplus < 0 ? '-$' : '$') + Math.abs(surplus).toLocaleString();
+      surplusEl.className = 'dr-val ' + (surplus > 0 ? 'grn' : surplus < 0 ? 'red' : '');
+    }
+
+    const program = parseGuidedNum('gin-exp-program');
+    const admin = parseGuidedNum('gin-exp-admin');
+    const ratioEl = document.getElementById('gin-ratio-display');
+    if (program == null || admin == null || (program + admin) <= 0) {
+      ratioEl.textContent = '—';
+      ratioEl.className = 'dr-val';
+    } else {
+      const ratio = (program / (program + admin)) * 100;
+      ratioEl.textContent = ratio.toFixed(1) + '%';
+      ratioEl.className = 'dr-val ' + (ratio >= 65 ? 'grn' : ratio >= 50 ? 'amb' : 'red');
+    }
+  }
+
+  // Same "ride along as an uploaded document excerpt" trick buildGuidedIntakeSummary() uses above —
+  // lets the nonprofit guided form reuse api/analyze.js's private-business analysis path (now with
+  // an orgType: 'nonprofit' flag) instead of needing a whole separate endpoint.
+  function buildGuidedIntakeNonprofitSummary(fields) {
+    const lines = ['Guided nonprofit intake form (organization-provided directly, not a bank statement):'];
+    const fundingParts = [];
+    if (fields.fundDonations != null) fundingParts.push(`donations: $${fields.fundDonations.toLocaleString()}`);
+    if (fields.fundGrants != null) fundingParts.push(`grants: $${fields.fundGrants.toLocaleString()}`);
+    if (fields.fundEvents != null) fundingParts.push(`fundraising events: $${fields.fundEvents.toLocaleString()}`);
+    if (fundingParts.length) lines.push(`Monthly funding breakdown — ${fundingParts.join(', ')} (total: $${fields.fundTotal.toLocaleString()})`);
+    if (fields.expProgram != null || fields.expAdmin != null) {
+      lines.push(`Monthly expenses breakdown — program/mission: ${fields.expProgram != null ? '$' + fields.expProgram.toLocaleString() : 'not provided'}, admin/overhead: ${fields.expAdmin != null ? '$' + fields.expAdmin.toLocaleString() : 'not provided'}`);
+    }
+    if (fields.reserves != null) lines.push(`Cash reserves / reserve fund balance: $${fields.reserves.toLocaleString()}`);
+    if (fields.donorCount != null) lines.push(`Recurring monthly donor count: ${fields.donorCount}`);
+    if (fields.staffVolunteer != null) lines.push(`Volunteer count (in addition to paid staff): ${fields.staffVolunteer}`);
+    lines.push(`Computed monthly surplus/deficit (total funding − total expenses): $${(fields.fundTotal - fields.expTotal).toLocaleString()}`);
+    return lines.join('\n');
+  }
+
+  async function runGuidedIntakeNonprofitScan() {
+    if (!(await checkScanAllowed('gin-err-box'))) return;
+
+    const orgName = document.getElementById('gin-org-name').value.trim();
+    const cause = document.getElementById('gin-cause').value;
+    const staffPaid = document.getElementById('gin-staff-paid').value.trim();
+    const age = document.getElementById('gin-age').value.trim();
+    const fundTotal = parseGuidedNum('gin-fund-total');
+    const expTotal = parseGuidedNum('gin-exp-total');
+
+    ['gin-cause', 'gin-staff-paid', 'gin-age', 'gin-fund-total', 'gin-exp-total'].forEach(id => {
+      document.getElementById(id).style.borderColor = '';
+    });
+
+    const missing = [];
+    if (!cause) missing.push('gin-cause');
+    if (!staffPaid) missing.push('gin-staff-paid');
+    if (!age) missing.push('gin-age');
+    if (fundTotal == null) missing.push('gin-fund-total');
+    if (expTotal == null) missing.push('gin-exp-total');
+
+    if (missing.length) {
+      missing.forEach(id => { document.getElementById(id).style.borderColor = '#c92b25'; });
+      const err = document.getElementById('gin-err-box');
+      err.textContent = "⚠ Please fill in mission area, paid staff count, years operating, last month's total funding, and total monthly expenses — everything else is optional.";
+      err.style.display = 'block';
+      return;
+    }
+
+    const staffVolunteer = parseGuidedNum('gin-staff-volunteer');
+    const fields = {
+      fundTotal,
+      fundDonations: parseGuidedNum('gin-fund-donations'),
+      fundGrants: parseGuidedNum('gin-fund-grants'),
+      fundEvents: parseGuidedNum('gin-fund-events'),
+      expTotal,
+      expProgram: parseGuidedNum('gin-exp-program'),
+      expAdmin: parseGuidedNum('gin-exp-admin'),
+      reserves: parseGuidedNum('gin-reserves'),
+      donorCount: parseGuidedNum('gin-donor-count'),
+      staffVolunteer
+    };
+    const summary = buildGuidedIntakeNonprofitSummary(fields);
+    const totalStaff = Number(staffPaid) + (staffVolunteer || 0);
+
+    document.getElementById('loading-title').textContent = 'Evaluating this nonprofit';
+    show('s-loading');
+    ['st1','st2','st3','st4','st5'].forEach((id, i) => {
+      setTimeout(() => document.getElementById(id).classList.add('done'), 700 + i * 800);
+    });
+
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bizName: orgName || 'This nonprofit',
+          industry: cause,
+          revenue: fundTotal,
+          expenses: expTotal,
+          employees: totalStaff,
+          age,
+          source: 'Guided nonprofit intake form',
+          fileContent: summary,
+          mode: scanMode,
+          subMode: 'nonprofit',
+          orgType: 'nonprofit'
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Analysis failed');
+      scanData = data;
+      currentScanBizName = orgName || 'This nonprofit';
+      renderResults(data);
+      if (currentUser) {
+        await saveScanAndIncrement(currentScanBizName, cause, data);
+      } else if (isGuest) {
+        guestScanCount += 1;
+      }
+    } catch (e) {
+      show('s-guided-intake-nonprofit');
+      const err = document.getElementById('gin-err-box');
       err.textContent = 'Something went wrong: ' + e.message;
       err.style.display = 'block';
     }
@@ -4955,13 +5219,15 @@
   }
 
   function renderResults(d) {
-    const c = MODE_COPY[scanMode];
+    const c = d.isNonprofit ? NONPROFIT_COPY : MODE_COPY[scanMode];
 
     document.getElementById('results-title').textContent = c.resultsTitle;
     document.getElementById('r-top-cut-label').textContent = c.topCutLabel;
     document.getElementById('r-top-cut-ico').textContent = '🎯';
     document.getElementById('r-pay-title').textContent = c.payTitle;
     document.getElementById('r-cut-title').textContent = c.cutTitle;
+    const industryTitle = document.getElementById('r-industry-title');
+    if (industryTitle) industryTitle.textContent = d.isNonprofit ? 'How you compare to similar nonprofits' : 'How you compare to similar businesses';
     // pw-title/pw-sub/pw-features removed during beta — paywall replaced with Coming Soon card
     const pwTitle = document.getElementById('pw-title');
     const pwSub = document.getElementById('pw-sub');
@@ -4971,7 +5237,7 @@
     if (pwFeatures) pwFeatures.innerHTML = c.pwFeatures.map(f => `<div class="pw-feature">${f}</div>`).join('');
 
     document.getElementById('r-score').textContent = d.score;
-    document.getElementById('r-status').textContent = (scanMode === 'investor' ? 'Safety: ' : 'Health: ') + d.status;
+    document.getElementById('r-status').textContent = (d.isNonprofit ? 'Health: ' : (scanMode === 'investor' ? 'Safety: ' : 'Health: ')) + d.status;
     document.getElementById('r-summary').textContent = d.summary;
     document.getElementById('r-badge').textContent = d.badge;
     drawRing('score-canvas', d.score, 70, 45);
@@ -5047,7 +5313,7 @@
 
     // FREE: top headline (first item of the cut/risk list, always shown) — the "fix this first" callout
     const topCut = (d.costCuts && d.costCuts[0]) || null;
-    document.getElementById('r-top-cut-title').textContent = topCut ? topCut.title : (scanMode === 'investor' ? 'No major red flags found' : 'No major cuts found');
+    document.getElementById('r-top-cut-title').textContent = topCut ? topCut.title : (d.isNonprofit ? 'No major concerns found' : (scanMode === 'investor' ? 'No major red flags found' : 'No major cuts found'));
     document.getElementById('r-top-cut-desc').textContent = topCut ? topCut.desc : 'Your spending looks reasonable for your revenue.';
     const impactBadge = document.getElementById('r-top-cut-impact');
     if (impactBadge) {
@@ -5547,7 +5813,7 @@
 
       rows.push(['Company', currentScanBizName || currentStockTicker || 'Unknown']);
       if (d.isPublicStock && currentStockTicker) rows.push(['Ticker', currentStockTicker]);
-      rows.push(['Mode', scanMode === 'investor' ? 'Investor' : 'Owner']);
+      rows.push(['Mode', d.isNonprofit ? 'Nonprofit' : scanMode === 'investor' ? 'Investor' : 'Owner']);
       rows.push(['Score', `${d.score}/100`]);
       rows.push(['Status', d.status || '']);
       rows.push(['Summary', d.summary || '']);
@@ -5570,7 +5836,7 @@
 
       if (Array.isArray(d.costCuts) && d.costCuts.length) {
         rows.push([]);
-        rows.push([scanMode === 'investor' ? 'Key Risks' : 'Cost Cuts']);
+        rows.push([d.isNonprofit ? 'Recommendations' : scanMode === 'investor' ? 'Key Risks' : 'Cost Cuts']);
         rows.push(['Title', 'Description', 'Severity']);
         d.costCuts.forEach(c => rows.push([c.title, c.desc, c.color === 'red' ? 'High' : c.color === 'amb' ? 'Medium' : 'Low']));
       }
@@ -5788,6 +6054,13 @@
   <!-- Draft actions: reuses the same Groq call as chat, but the output is always framed as a
        draft the user reviews/edits, never APEX's own stance — see requestChatDraft(). -->
   <div style="padding:0.5rem 1rem 0; border-top:1px solid var(--border); display:flex; gap:6px; flex-wrap:wrap; background:var(--surface);">
+    <!-- Quick questions: sends a canned prompt straight through the normal chat flow (not the
+         draft flow — these want an actual grounded answer in the conversation, not an editable
+         artifact). api/chat.js's buildScanSection/buildExtraScanSections + buildMethodologyReference
+         already ground every chat reply in the real numbers/formulas, so these just save the user
+         from having to type the question themselves. -->
+    <button id="chat-explain-score-btn" onclick="sendChatMessage('Can you break down exactly why I got this score and status, using the specific numbers from my scan?')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Explain my score</button>
+    <button onclick="sendChatMessage('How exactly does APEX calculate this? Walk me through the real methodology, not a generic definition.')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">How is this calculated?</button>
     <button onclick="requestChatDraft('advisor_question')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Draft question for advisor</button>
     <button onclick="requestChatDraft('research_note')" style="background:var(--card); border:1px solid var(--border); border-radius:14px; padding:5px 10px; font-size:11px; color:var(--text); cursor:pointer;">Draft research note</button>
     <!-- STOCK SCANS ONLY: opens the deterministic watch-condition wizard below — hidden/shown by
@@ -5847,6 +6120,8 @@
     // cron to track).
     const watchBtn = document.getElementById('chat-watch-condition-btn');
     if (watchBtn) watchBtn.style.display = data.isPublicStock ? '' : 'none';
+    const explainBtn = document.getElementById('chat-explain-score-btn');
+    if (explainBtn) explainBtn.style.display = '';
   }
 
   // APEX Agent: opens the same chat widget with no specific scan behind it — for "how's my
@@ -5865,6 +6140,8 @@
     revealChatFab();
     const watchBtn = document.getElementById('chat-watch-condition-btn');
     if (watchBtn) watchBtn.style.display = 'none'; // no single ticker in this mode
+    const explainBtn = document.getElementById('chat-explain-score-btn');
+    if (explainBtn) explainBtn.style.display = 'none'; // no single score in this mode
     if (!chatOpen) toggleChat();
   }
 
@@ -5964,13 +6241,15 @@
     return div;
   }
 
-  async function sendChatMessage() {
+  async function sendChatMessage(presetText) {
     const input = document.getElementById('chat-input');
-    const text = input.value.trim();
+    // presetText comes from the quick-question chips above (Explain my score / How is this
+    // calculated?) — same send path as anything the user types, just skipping the input box.
+    const text = (typeof presetText === 'string' ? presetText : input.value).trim();
     // chatScanData is only required outside 'portfolio' mode — a portfolio-only chat session
     // (opened from the Watchlist/Portfolio pages) has no single scan behind it.
     if (!text || (!chatScanData && chatMode !== 'portfolio')) return;
-    input.value = '';
+    if (typeof presetText !== 'string') input.value = '';
 
     addChatMessage(text, 'user');
     chatHistory.push({ role: 'user', content: text });
