@@ -88,11 +88,6 @@
        stays on a white surface instead of the raw gradient. */
     .drop-zone { background: var(--card); border: 1px dashed var(--border-hover); border-radius: var(--radius); padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.15s; margin-bottom: 1.5rem; }
     .drop-zone:hover { border-color: var(--accent); }
-    .option-divider { display: flex; align-items: center; gap: 12px; margin: -0.75rem 0 1.25rem; }
-    .option-divider::before, .option-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-    .option-divider span { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); }
-    .drop-zone-alt { border-style: solid; background: var(--accent-dim); border-color: var(--accent-glow); }
-    .drop-zone-alt:hover { border-color: var(--accent); }
     .drop-icon { font-size: 28px; margin-bottom: 8px; display: block; color: var(--muted); }
     .drop-title { font-size: 14px; color: var(--text); margin-bottom: 4px; }
     .drop-sub { font-size: 12px; color: var(--muted); }
@@ -513,6 +508,20 @@
     .history-empty { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
     .history-loading { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
 
+    /* BUSINESS VIEW cards (Home) — reuses .history-item/.history-score/.history-info above for
+       the row shell, adds flags/trend/actions below the meta line. */
+    .biz-flags { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+    .biz-flag-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .biz-flag-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+    .biz-flag-dot.grn { background: var(--green); }
+    .biz-flag-dot.amb { background: var(--amber); }
+    .biz-flag-dot.red { background: var(--red); }
+    .biz-trend-canvas-wrap { margin-top: 10px; }
+    .biz-pro-lock { margin-top: 8px; font-size: 11px; color: var(--muted); font-style: italic; }
+    .biz-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .biz-action-btn { padding: 6px 12px; font-size: 12px; font-weight: 500; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: background 0.15s, border-color 0.15s; }
+    .biz-action-btn:hover { background: var(--surface); border-color: var(--border-hover); }
+
     .watchlist-item { display: flex; align-items: center; gap: 14px; padding: 14px 4px; border-bottom: 1px solid var(--border); }
     .watchlist-item:last-child { border-bottom: none; }
     .watchlist-info { flex: 1; min-width: 0; }
@@ -715,21 +724,37 @@
       <h2>Welcome back</h2>
     </div>
 
-    <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="show('s-connect')">Get started — run a new scan →</button>
-
-    <div class="section-title">Your Watchlist</div>
-    <div class="watchlist-page-list" id="home-watchlist-list" style="margin-bottom:1.75rem;">
-      <div class="history-loading">Loading watchlist…</div>
+    <div class="mode-toggle" id="home-view-toggle">
+      <button class="mode-btn active" id="home-view-btn-investor" onclick="setHomeView('investor')">Investor View</button>
+      <button class="mode-btn" id="home-view-btn-business" onclick="setHomeView('business')">Business View</button>
     </div>
 
-    <div class="section-title">Latest Alerts</div>
-    <div class="history-list" id="home-alerts-list" style="margin-bottom:1.75rem;">
-      <div class="history-loading">Loading alerts…</div>
+    <div id="home-investor-view">
+      <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="show('s-connect')">Get started — run a new scan →</button>
+
+      <div class="section-title">Your Watchlist</div>
+      <div class="watchlist-page-list" id="home-watchlist-list" style="margin-bottom:1.75rem;">
+        <div class="history-loading">Loading watchlist…</div>
+      </div>
+
+      <div class="section-title">Latest Alerts</div>
+      <div class="history-list" id="home-alerts-list" style="margin-bottom:1.75rem;">
+        <div class="history-loading">Loading alerts…</div>
+      </div>
+
+      <div class="section-title">Recent News</div>
+      <div id="home-news-list" style="margin-bottom:1.75rem;">
+        <div class="history-loading">Loading news…</div>
+      </div>
     </div>
 
-    <div class="section-title">Recent News</div>
-    <div id="home-news-list" style="margin-bottom:1.75rem;">
-      <div class="history-loading">Loading news…</div>
+    <div id="home-business-view" style="display:none;">
+      <button class="btn btn-accent btn-full" style="margin-bottom:1.5rem;" onclick="setMode('owner'); show('s-connect');">Run a new business scan →</button>
+
+      <div class="section-title">Your Businesses</div>
+      <div id="home-business-list" style="margin-bottom:1.75rem;">
+        <div class="history-loading">Loading businesses…</div>
+      </div>
     </div>
   </div>
 </div>
@@ -762,13 +787,8 @@
       </div>
       <input type="file" id="file-in" accept=".csv,.xlsx,.pdf,.txt" style="display:none" onchange="onFile(this)" />
       <div class="file-ok" id="file-ok">✓ <span id="file-name-label"></span> ready</div>
-
-      <div class="option-divider"><span>or</span></div>
-
-      <div class="drop-zone drop-zone-alt" onclick="openGuidedIntake()">
-        <span class="drop-icon">📝</span>
-        <div class="drop-title">Don't have a bank statement? Answer a guided form</div>
-        <div class="drop-sub">Revenue, expenses, payroll, cash on hand — no bank login, ~2 minutes</div>
+      <div style="text-align:center; margin: 4px 0 12px;">
+        <a href="#" onclick="event.preventDefault(); openGuidedIntake();" style="font-size:12px; color:var(--muted); text-decoration:underline;">Don't have a bank statement? Try a guided form instead →</a>
       </div>
 
       <span class="biz-label" id="biz-label-text">Tell APEX about your business</span>
@@ -2498,10 +2518,173 @@
     }
   }
 
-  function openHomePage() {
+  async function openHomePage() {
     show('s-home');
     loadHomeWatchlist().then(tickers => loadHomeNews(tickers));
     loadHomeAlerts();
+
+    if (!currentUser) { setHomeView('investor'); return; }
+    const storedView = localStorage.getItem('apex_home_view_' + currentUser.id);
+    const view = storedView || await determineDefaultHomeView();
+    setHomeView(view);
+  }
+
+  // ── HOME VIEW TOGGLE (Investor View / Business View) ──
+  // Same shell as setMode()/setInvestorSubMode() above: toggle .active on the two buttons, swap
+  // display on two sibling content divs. Persisted per-user so returning visitors land back on
+  // whichever view they last used, rather than recomputing determineDefaultHomeView() every time.
+  let homeBusinessViewLoaded = false;
+
+  function setHomeView(view) {
+    document.getElementById('home-view-btn-investor').classList.toggle('active', view === 'investor');
+    document.getElementById('home-view-btn-business').classList.toggle('active', view === 'business');
+    document.getElementById('home-investor-view').style.display = view === 'investor' ? 'block' : 'none';
+    document.getElementById('home-business-view').style.display = view === 'business' ? 'block' : 'none';
+
+    if (currentUser) localStorage.setItem('apex_home_view_' + currentUser.id, view);
+
+    if (view === 'business' && !homeBusinessViewLoaded) {
+      homeBusinessViewLoaded = true;
+      loadHomeBusinessView();
+    }
+  }
+
+  // Defaults new/unset visitors to whichever "side" of the app they used most recently: a
+  // private-business scan (mode 'owner', or 'investor' scans of a non-public-stock business)
+  // vs. investor activity (public-stock scans, watchlist adds, portfolio adds). Only called once
+  // per user, from openHomePage(), when no apex_home_view_<userId> preference is stored yet.
+  async function determineDefaultHomeView() {
+    try {
+      const [scansRes, wlRes, pfRes] = await Promise.all([
+        sb.from('scans').select('created_at, mode, full_data').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(20),
+        sb.from('watchlist').select('created_at').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(1),
+        sb.from('portfolio_holdings').select('created_at').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(1)
+      ]);
+      const scans = scansRes.data || [];
+
+      const isPrivateBusinessScan = row => row.mode === 'owner' || (row.mode === 'investor' && !row.full_data?.isPublicStock);
+      const privateMax = scans.filter(isPrivateBusinessScan).map(row => new Date(row.created_at).getTime())[0] || 0;
+
+      const publicStockMax = scans.filter(row => row.full_data?.isPublicStock).map(row => new Date(row.created_at).getTime())[0] || 0;
+      const wlMax = wlRes.data?.[0]?.created_at ? new Date(wlRes.data[0].created_at).getTime() : 0;
+      const pfMax = pfRes.data?.[0]?.created_at ? new Date(pfRes.data[0].created_at).getTime() : 0;
+      const investorMax = Math.max(publicStockMax, wlMax, pfMax);
+
+      return (privateMax > 0 && privateMax > investorMax) ? 'business' : 'investor';
+    } catch (e) {
+      return 'investor';
+    }
+  }
+
+  // ── HOME BUSINESS VIEW ── (private-business scan history, grouped by business_name — see
+  // apex-schema-snapshot.sql: scans has no business_id, exact business_name match is the only
+  // identity key, same convention loadScoreTrend() already relies on)
+  let homeBusinessGroups = []; // cached rows from the last loadHomeBusinessView(), looked up by index
+
+  async function loadHomeBusinessView() {
+    const listEl = document.getElementById('home-business-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="history-loading">Loading businesses…</div>';
+
+    if (!currentUser) {
+      listEl.innerHTML = '<div class="history-empty">Log in to see your business scan history.</div>';
+      return;
+    }
+
+    try {
+      const { data, error } = await sb
+        .from('scans')
+        .select('business_name, industry, score, status, created_at, mode, full_data')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+
+      const privateScans = (data || []).filter(row => row.mode === 'owner' || (row.mode === 'investor' && !row.full_data?.isPublicStock));
+
+      const groupMap = new Map();
+      for (const row of privateScans) {
+        const key = row.business_name || 'Untitled scan';
+        if (!groupMap.has(key)) groupMap.set(key, []);
+        groupMap.get(key).push(row);
+      }
+      homeBusinessGroups = [...groupMap.entries()].map(([bizName, scans]) => ({ bizName, scans }));
+
+      if (!homeBusinessGroups.length) {
+        listEl.innerHTML = '<div class="history-empty">No business scans yet — run your first safety scan to see it here.</div>';
+        return;
+      }
+
+      listEl.innerHTML = homeBusinessGroups.map((group, i) => renderBusinessCard(group, i)).join('');
+
+      // Trend charts draw into canvases that only exist after the innerHTML assignment above.
+      homeBusinessGroups.forEach((group, i) => {
+        if (!effectiveIsPro() || group.scans.length < 2) return;
+        const points = [...group.scans].reverse().map(s => ({ score: s.score ?? 0, date: new Date(s.created_at) }));
+        drawStockScoreTrendChart('biz-trend-' + i, points);
+      });
+    } catch (e) {
+      listEl.innerHTML = '<div class="history-empty">Couldn\'t load your business scans. Please try again.</div>';
+    }
+  }
+
+  function renderBusinessCard(group, index) {
+    const latest = group.scans[0];
+    const score = latest.score ?? 0;
+    const scoreClass = score >= 70 ? 'hs-good' : score >= 45 ? 'hs-warn' : 'hs-bad';
+    const bizName = escapeHtml(group.bizName);
+    const industry = escapeHtml(latest.industry || '—');
+    const date = new Date(latest.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const scanCountLabel = group.scans.length === 1 ? '1 scan' : `${group.scans.length} scans`;
+
+    const costCuts = Array.isArray(latest.full_data?.costCuts) ? latest.full_data.costCuts : [];
+    const flagsHtml = costCuts.length
+      ? `<div class="biz-flags">${costCuts.map(f => `
+          <div class="biz-flag-row"><span class="biz-flag-dot ${f.color || ''}"></span>${escapeHtml(f.title || '')}</div>`).join('')}</div>`
+      : '';
+
+    let trendHtml = '';
+    if (group.scans.length >= 2) {
+      if (effectiveIsPro()) {
+        trendHtml = `<div class="biz-trend-canvas-wrap"><canvas id="biz-trend-${index}" width="600" height="90" style="max-width:100%; height:auto; display:block;"></canvas></div>`;
+      } else {
+        trendHtml = `<div class="biz-pro-lock">🔒 Upgrade to Pro to see this business's safety score trend over time.</div>`;
+      }
+    }
+
+    return `
+      <div class="history-item" style="cursor:default; align-items:flex-start;">
+        <div class="history-score ${scoreClass}">${score}</div>
+        <div class="history-info">
+          <div class="history-biz">${bizName}</div>
+          <div class="history-meta">${industry} · ${scanCountLabel} · last ${date}</div>
+          ${flagsHtml}
+          ${trendHtml}
+          <div class="biz-actions">
+            <button class="biz-action-btn" onclick="viewBusinessReport(${index})">View full report</button>
+            <button class="biz-action-btn" onclick="rescanBusiness()">Re-scan</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function viewBusinessReport(index) {
+    const group = homeBusinessGroups[index];
+    if (!group) return;
+    const row = group.scans[0];
+    if (!row || !row.full_data) return;
+
+    scanMode = row.mode === 'investor' ? 'investor' : 'owner';
+    scanData = row.full_data;
+    currentScanBizName = row.business_name || '';
+    currentStockTicker = null;
+
+    renderResults(scanData);
+  }
+
+  function rescanBusiness() {
+    setMode('owner');
+    show('s-connect');
   }
 
   // ── PRICE ALERTS ("Wait for it") ──
