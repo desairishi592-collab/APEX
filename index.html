@@ -3851,7 +3851,7 @@
         // chart can reliably match past scans of the SAME ticker later, rather than guessing from
         // business_name (which stores the typed company name when provided, not always the ticker).
         data.ticker = currentStockTicker;
-        await saveScanAndIncrement(companyName || ticker, 'Public stock', data);
+        await saveScanAndIncrement(companyName || ticker, 'Public stock', data, 'investor');
       } else if (isGuest) {
         guestScanCount += 1;
       }
@@ -4053,7 +4053,7 @@
       if (currentUser) {
         // See the primary single-stock scan flow above for why this is embedded directly.
         data.ticker = trimmedTicker.toUpperCase();
-        await saveScanAndIncrement(name, 'Public stock', data);
+        await saveScanAndIncrement(name, 'Public stock', data, 'investor');
       } else if (isGuest) {
         guestScanCount += 1;
       }
@@ -4260,7 +4260,7 @@
       if (currentUser) {
         // See the primary single-stock scan flow above for why this is embedded directly.
         sideA.data.ticker = tickerA.toUpperCase();
-        await saveScanAndIncrement(sideA.name, 'Public stock', sideA.data);
+        await saveScanAndIncrement(sideA.name, 'Public stock', sideA.data, 'investor');
       } else if (isGuest) {
         guestScanCount += 1;
       }
@@ -4896,7 +4896,12 @@
   }
 
   // ── SAVE SCAN TO HISTORY + INCREMENT COUNT ──
-  async function saveScanAndIncrement(bizName, industry, data) {
+  // scanModeOverride lets stock-scan call sites (runStockScan, runCompareScan,
+  // runStandaloneCompare) pass 'investor' explicitly instead of falling back to the ambient
+  // scanMode global, which reflects the owner/investor toggle on the main scan form and isn't
+  // necessarily 'investor' when a scan is saved from the Investments compare page (which never
+  // touches that toggle at all).
+  async function saveScanAndIncrement(bizName, industry, data, scanModeOverride) {
     if (!currentUser) return;
     try {
       await sb.from('scans').insert({
@@ -4906,7 +4911,7 @@
         score: data.score,
         status: data.status,
         full_data: data,
-        mode: scanMode
+        mode: scanModeOverride || scanMode
       });
 
       // Only real Pro skips the counter — preview-Pro is a dev view only, doesn't change billing state
