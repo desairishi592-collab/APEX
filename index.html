@@ -88,6 +88,11 @@
        stays on a white surface instead of the raw gradient. */
     .drop-zone { background: var(--card); border: 1px dashed var(--border-hover); border-radius: var(--radius); padding: 2rem; text-align: center; cursor: pointer; transition: border-color 0.15s; margin-bottom: 1.5rem; }
     .drop-zone:hover { border-color: var(--accent); }
+    .option-divider { display: flex; align-items: center; gap: 12px; margin: -0.75rem 0 1.25rem; }
+    .option-divider::before, .option-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .option-divider span { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim); }
+    .drop-zone-alt { border-style: solid; background: var(--accent-dim); border-color: var(--accent-glow); }
+    .drop-zone-alt:hover { border-color: var(--accent); }
     .drop-icon { font-size: 28px; margin-bottom: 8px; display: block; color: var(--muted); }
     .drop-title { font-size: 14px; color: var(--text); margin-bottom: 4px; }
     .drop-sub { font-size: 12px; color: var(--muted); }
@@ -757,8 +762,13 @@
       </div>
       <input type="file" id="file-in" accept=".csv,.xlsx,.pdf,.txt" style="display:none" onchange="onFile(this)" />
       <div class="file-ok" id="file-ok">✓ <span id="file-name-label"></span> ready</div>
-      <div style="text-align:center; margin: 4px 0 12px;">
-        <a href="#" onclick="event.preventDefault(); openGuidedIntake();" style="font-size:12px; color:var(--muted); text-decoration:underline;">Don't have a bank statement? Try a guided form instead →</a>
+
+      <div class="option-divider"><span>or</span></div>
+
+      <div class="drop-zone drop-zone-alt" onclick="openGuidedIntake()">
+        <span class="drop-icon">📝</span>
+        <div class="drop-title">Don't have a bank statement? Answer a guided form</div>
+        <div class="drop-sub">Revenue, expenses, payroll, cash on hand — no bank login, ~2 minutes</div>
       </div>
 
       <span class="biz-label" id="biz-label-text">Tell APEX about your business</span>
