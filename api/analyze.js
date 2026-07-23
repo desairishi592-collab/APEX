@@ -107,6 +107,33 @@ function parseMoney(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Profit Margin, Burn Rate, and Revenue per Employee are otherwise free-text fields the model
+// writes itself — nothing forces its arithmetic to actually match extractedFinancials. This
+// recomputes those three from extractedFinancials directly so they can't drift from the numbers
+// the rest of the analysis (and the user's source document) is actually based on.
+function applyDeterministicMetrics(parsed) {
+  const ef = parsed?.extractedFinancials;
+  if (!ef || typeof ef !== 'object' || !Array.isArray(parsed.metrics)) return;
+
+  const rev = Number(ef.revenue);
+  const exp = Number(ef.expenses);
+  const emp = Number(ef.employees);
+
+  const setMetric = (label, value) => {
+    const m = parsed.metrics.find(x => x && x.label === label);
+    if (m) m.value = value;
+  };
+
+  if (Number.isFinite(rev) && rev > 0 && Number.isFinite(exp)) {
+    const marginPct = ((rev - exp) / rev) * 100;
+    setMetric('Profit Margin', `${marginPct.toFixed(1)}%`);
+    setMetric('Burn Rate', `$${Math.round(exp).toLocaleString('en-US')}/mo`);
+  }
+  if (Number.isFinite(rev) && rev > 0 && Number.isFinite(emp) && emp > 0) {
+    setMetric('Revenue per Employee', `$${Math.round(rev / emp).toLocaleString('en-US')}/mo`);
+  }
+}
+
 // Deterministic payroll ceiling — not left to the AI so the dollar figure is
 // reproducible and grounded in the actual numbers, not a language-model guess.
 // Combines two independent estimates and takes the more conservative (lower) one:
@@ -307,6 +334,13 @@ Return JSON in EXACTLY this shape:
     { "label": "Profit Margin", "value": "<e.g. '18%'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" },
     { "label": "Revenue per Employee", "value": "<e.g. '$8,200/mo'>", "type": "up"|"down"|"warn", "trend": "<short trend note>" }
   ],
+  "extractedFinancials": {
+    "revenue": <number, the exact monthly revenue in USD this analysis is based on — the manual figure above if provided, otherwise your best-effort exact read from the uploaded document; do not round for readability>,
+    "expenses": <number, exact monthly total expenses in USD, same rule>,
+    "employees": <integer, exact employee count, same rule>,
+    "debtMonthlyPayment": <number, total monthly payment across ALL outstanding business loans/financing ONLY — do NOT include routine operating costs like rent, utilities, subscriptions, or equipment/vehicle leases even though they recur monthly; 0 if the data states there is no debt>,
+    "debtOutstandingTotal": <number, total outstanding principal across all business loans/financing ONLY, 0 if none mentioned>
+  },
   ${payBenchmarkFraming},
   ${industryComparisonFraming},
   ${costCutsFraming},
@@ -316,6 +350,8 @@ Return JSON in EXACTLY this shape:
 
 Rules:
 ${orderingRule}
+- A small routine operating lease (equipment, vehicle, office/rent) is NOT the same as business debt — only actual loans, lines of credit, or financing count as debt. A business with no loans and only a minor equipment/vehicle lease should show LOW debt risk in "Debt Level" and extractedFinancials, not high, even if that lease is technically a recurring monthly obligation.
+- "extractedFinancials" must reflect the exact numbers you actually used elsewhere in this analysis — Profit Margin, Burn Rate, and Revenue per Employee will be recalculated from it, so it must be numerically consistent with the source data, not a rounded or generic estimate.
 - "payBenchmark" should reflect realistic, industry-typical roles for a ${industryForPrompt} business with ${employees || 'an unspecified number of'} employees — infer likely roles (e.g. retail: cashier, store manager; restaurant: server, chef; SaaS: engineer, support).
 - "industryComparison" percentiles should be grounded in realistic typical benchmarks for a ${industryForPrompt} business of similar size, derived from the revenue/expenses/employee count given — be specific and realistic, not generic (avoid defaulting every metric to 50).
 - "riskTimeline" items MUST be ordered soonest-first and grounded in the actual revenue/expenses/burn rate/debt numbers given — use specific, concrete timeframes, not vague ones like "eventually" or "long term".
@@ -326,15 +362,19 @@ ${orderingRule}
       if (!parsed || typeof parsed !== 'object') return;
       clampIndustryPercentiles(parsed);
       sanitizeRiskTimeline(parsed);
+      applyDeterministicMetrics(parsed);
       // Fallback if the AI omits fixImpact, based on the #1 item's own severity color
       if (typeof parsed.fixImpact !== 'string' || !parsed.fixImpact.trim()) {
         const topColor = parsed.costCuts?.[0]?.color;
         parsed.fixImpact = topColor === 'red' ? 'High impact on your score' : topColor === 'amb' ? 'Moderate impact on your score' : 'Worth addressing';
       }
       if (scanMode !== 'owner') return; // payroll safety calculator is an owner-mode feature only
-      const revenueNum = parseMoney(revenue);
-      const expensesNum = parseMoney(expenses);
-      const employeesNum = parseMoney(employees);
+      const ef = parsed.extractedFinancials;
+      // Manual fields win when present; otherwise fall back to what the AI extracted from the
+      // uploaded document, so the payroll calculator still works on file-upload-only scans.
+      const revenueNum = parseMoney(revenue) ?? (Number.isFinite(Number(ef?.revenue)) ? Number(ef.revenue) : null);
+      const expensesNum = parseMoney(expenses) ?? (Number.isFinite(Number(ef?.expenses)) ? Number(ef.expenses) : null);
+      const employeesNum = parseMoney(employees) ?? (Number.isFinite(Number(ef?.employees)) ? Number(ef.employees) : null);
       let score = Number(parsed.score);
       if (!Number.isFinite(score)) score = 50;
       parsed.payrollSafety = computePayrollSafety(revenueNum, expensesNum, score);
