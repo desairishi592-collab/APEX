@@ -80,6 +80,66 @@ Never suggest executing a trade on the user's behalf — you can discuss what to
 None of the above is an excuse to write a long answer — follow the RESPONSE STYLE rules below regardless of how much context this section gives you.`;
 }
 
+function formatUsd(n) {
+  return Number.isFinite(n) ? `$${Math.round(n).toLocaleString('en-US')}` : null;
+}
+
+// Everything beyond score/status/summary/metrics/costCuts/industryComparison that a specific
+// "why is X flagged" / "what's my Y based on" question needs to be answered with the real
+// numbers instead of a generic definition — the exact data a scan already computed but the
+// chat context previously left out.
+function buildExtraScanSections(data, score) {
+  const isStock = !!data?.isPublicStock;
+  const sections = [];
+
+  if (isStock) {
+    if (Array.isArray(data?.subScores) && data.subScores.length) {
+      sections.push(`Score breakdown (exactly how the ${score}/100 score above was derived — see METHODOLOGY REFERENCE for the formula):\n` +
+        data.subScores.map(s => `• ${s.category}: ${s.score}/10${s.weightLabel ? ` (${s.weightLabel})` : ' (shown for information, not part of the weighted average)'} — ${s.reason}`).join('\n'));
+    }
+    if (Array.isArray(data?.redFlags) && data.redFlags.length) {
+      sections.push(`Red flags triggered:\n` + data.redFlags.map(f => `• ${f.name} (${f.severity} severity): ${f.explanation || ''}`).join('\n'));
+    }
+    if (data?.sectorBenchmark?.sector) {
+      sections.push(`Benchmarked against: ${data.sectorBenchmark.sector} sector${data.sectorBenchmark.matched ? '' : ' (no specific sector match — used general-market reference points)'}.`);
+    }
+    if (data?.stockAnalysis && typeof data.stockAnalysis === 'object') {
+      const sa = data.stockAnalysis;
+      sections.push(`Stock outlook: signal ${sa.signal || '?'}, safety score ${sa.safetyScore ?? '?'}/100 (separate from the ${score}/100 score above — this measures how attractive the STOCK looks at its current price, not business quality). ${sa.verdict || ''}`.trim());
+    }
+    if (typeof data?.insiderSentiment?.summary === 'string') {
+      sections.push(`Insider activity: ${data.insiderSentiment.summary}`);
+    }
+  } else {
+    const ef = data?.extractedFinancials;
+    if (ef && typeof ef === 'object') {
+      const parts = [];
+      const rev = formatUsd(Number(ef.revenue));
+      const exp = formatUsd(Number(ef.expenses));
+      if (rev) parts.push(`revenue ${rev}/mo`);
+      if (exp) parts.push(`expenses ${exp}/mo`);
+      if (Number.isFinite(Number(ef.employees))) parts.push(`${ef.employees} employees`);
+      const debtPay = formatUsd(Number(ef.debtMonthlyPayment));
+      const debtTotal = formatUsd(Number(ef.debtOutstandingTotal));
+      if (debtPay) parts.push(`debt payment ${debtPay}/mo`);
+      if (debtTotal) parts.push(`debt outstanding ${debtTotal}`);
+      if (parts.length) sections.push(`Exact figures this scan is based on: ${parts.join(', ')}.`);
+    }
+    if (typeof data?.payrollSafety?.explanation === 'string') {
+      sections.push(`Payroll safety ceiling: ${data.payrollSafety.maxMonthlyPayrollFormatted || '?'}/mo. ${data.payrollSafety.explanation}`);
+    }
+    if (Array.isArray(data?.payBenchmark) && data.payBenchmark.length) {
+      sections.push(`Pay benchmark:\n` + data.payBenchmark.slice(0, 5).map(p => `• ${p.role}: ${p.value}`).join('\n'));
+    }
+  }
+
+  if (typeof data?.fixImpact === 'string' && data.fixImpact.trim()) {
+    sections.push(`If the #1 risk/opportunity above were addressed: ${data.fixImpact}`);
+  }
+
+  return sections;
+}
+
 // Shared by buildChatContext and buildDraftPrompt — both need the same "here's what the scan
 // actually found" framing, only what's built on top of it differs (open-ended Q&A vs. a single
 // drafted artifact).
@@ -101,9 +161,16 @@ function buildScanSection(data, bizName, mode) {
   const risks = Array.isArray(data?.costCuts)
     ? data.costCuts.slice(0, 10).map(r => `• ${r.title}: ${r.desc}`).join('\n')
     : '';
+  // Field names must match what the scan endpoints actually return (metric/percentile/summary) —
+  // this previously read i.label/i.value, which don't exist on these objects, so every line here
+  // silently rendered as "undefined: undefined" and the model never actually saw the percentiles.
   const industry = Array.isArray(data?.industryComparison)
-    ? data.industryComparison.slice(0, 10).map(i => `• ${i.label}: ${i.value}`).join('\n')
+    ? data.industryComparison.slice(0, 10).map(i => `• ${i.metric}: ${i.percentile}th percentile — ${i.summary}`).join('\n')
     : '';
+  const riskTimeline = Array.isArray(data?.riskTimeline)
+    ? data.riskTimeline.slice(0, 10).map(r => `• ${r.risk} (${r.timeframe}): ${r.detail}`).join('\n')
+    : '';
+  const extraSections = buildExtraScanSections(data, score);
 
   return `A user just completed an APEX ${isStock ? 'stock investment' : safeMode === 'investor' ? 'business investment' : 'business health'} scan. Here are the real results:
 
@@ -119,7 +186,33 @@ Risk Breakdown:
 ${risks}
 
 Industry Comparison:
-${industry}`;
+${industry}
+${riskTimeline ? `\nRisk Timeline:\n${riskTimeline}` : ''}
+${extraSections.length ? `\n${extraSections.join('\n\n')}` : ''}`;
+}
+
+// ── METHODOLOGY TRANSPARENCY ──
+// Ground truth for "how does APEX actually calculate this" questions, written directly from the
+// real scoring logic (lib/subScores.js, lib/sectorBenchmarks.js, lib/redFlags.js for stock scans;
+// api/analyze.js's applyDeterministicMetrics/computePayrollSafety for business scans) rather than
+// left for the model to guess at or hallucinate a generic textbook definition. Keep this in sync
+// if those formulas/weights change — stale methodology text would be worse than none.
+const STOCK_METHODOLOGY = `STOCK SCAN METHODOLOGY:
+The 0-100 score is a weighted average of five sub-scores (each scored 0-10, shown in "Score breakdown" above if a scan is open): Profitability 25% (profit margin + ROE vs. sector), Financial Health 20% (debt/equity 25% + current ratio 25% + free cash flow margin 50% of the category — FCF margin dominates because it shows whether the company can actually service its debt, not just a balance-sheet snapshot; if FCF margin alone is a clear strength it sets a floor under this category so it can't be dragged down by the other two), Valuation 15% (P/E vs. sector; skipped entirely when P/E is negative, since that reflects losses, not a valuation signal), Risk/Volatility 15% (beta vs. sector), Momentum 25% (1-year price return — NOT sector-relative, same formula for every company: 50 + return% × 1.2, clamped 0-100).
+Each sector-relative metric is scored 0-100 by comparing the raw value against that specific sector's "good/median/poor" reference points via linear interpolation (poor→20, median→50, good→100). Be precise when explaining this: it's a calibrated reference-point comparison against typical values for the sector, NOT a true statistical percentile computed from live peer data — don't overstate it as one.
+A sixth category, Red Flags, is deliberately excluded from the weighted average — it's deterministic threshold checks (high debt/equity, thin current ratio, declining/negative free cash flow, declining revenue, an insider-selling spike), each costing 1-4 of 10 points, kept separate so a serious flag can't be mathematically diluted away by strong numbers elsewhere. On top of the weighted average, a hard ceiling can still cap the final score: a 1-year return ≤ -50% caps it at 30, ≤ -25% caps it at 50, a negative profit margin caps it at 40, a negative P/E caps it at 45.
+The "safety score" in Stock Outlook is a SEPARATE number from the main score — it measures how attractive the stock looks at its CURRENT PRICE (valuation + momentum + dividend), not underlying business quality, and Buy/Hold/Sell is derived directly from it (66-100 Buy, 41-65 Hold, 0-40 Sell).`;
+
+const BUSINESS_METHODOLOGY = `PRIVATE-BUSINESS SCAN METHODOLOGY:
+The 0-100 score, status, and industry-comparison percentiles are produced by an AI model that weighs the business's actual revenue, expenses, debt, industry, and size holistically — the way a human financial analyst would — rather than a single fixed formula. Be upfront about that distinction if asked directly (unlike the stock-scan score, which is a hard formula).
+What IS computed deterministically, not left to the AI: Burn Rate = monthly expenses; Profit Margin = (revenue − expenses) ÷ revenue; Revenue per Employee = revenue ÷ employee count — all recalculated directly from the exact figures the scan extracted, so they can't drift from the source numbers. In owner-mode scans, the Payroll Safety ceiling is also a fixed formula: the LOWER of (a) a revenue-based ratio that scales from 18% to 45% of revenue depending on the health-score band, and (b) a cash-flow ceiling (revenue minus expenses minus a safety buffer that scales from 8% to 28% depending on health score) — it always takes the more conservative of the two.
+On debt specifically: only real loans, lines of credit, or financing count as "debt" — a routine equipment/vehicle/office lease does NOT, even though it recurs monthly, so a business with no loans and just a minor lease should show LOW debt risk. The monthly debt payment and outstanding principal are extracted directly from the numbers/documents provided (see "Exact figures" above if a scan is open), then factored by the AI into the score, status, and risk timeline alongside cash runway, burn rate, and how the business compares to typical same-industry peers of similar size.`;
+
+function buildMethodologyReference(data, mode) {
+  if (data?.isPublicStock) return STOCK_METHODOLOGY;
+  if (data && mode !== 'portfolio') return BUSINESS_METHODOLOGY;
+  // No single scan open (portfolio-mode Agent chat) — either type could come up, so give both.
+  return `${STOCK_METHODOLOGY}\n\n${BUSINESS_METHODOLOGY}`;
 }
 
 // Builds the system prompt SERVER-SIDE from structured scan data — the client used to send a
@@ -128,12 +221,18 @@ ${industry}`;
 // can only supply the scan data; the actual instructions given to the model are fixed here.
 function buildChatContext(data, bizName, mode, portfolioContext) {
   const scanSection = buildScanSection(data, bizName, mode);
+  const methodology = buildMethodologyReference(data, mode);
 
   return `You are APEX AI, a financial analysis assistant embedded in the APEX business health scanner.
 
 ${scanSection}
 
-${portfolioContext ? portfolioContext + '\n\n' : ''}Your job: answer the user's questions in plain, honest English. You can discuss whether something looks like a good investment, what risks mean, how to think about position sizing given a budget, when to consider selling, what specific metrics mean in context, and how it fits into their broader portfolio, etc.
+${portfolioContext ? portfolioContext + '\n\n' : ''}METHODOLOGY REFERENCE — use this whenever the user asks how APEX actually calculates a score, percentile, or metric (e.g. "how is my health score calculated", "what does debt risk percentile mean", "how do you get burn rate"). This is the real logic behind the numbers, not a generic textbook definition — explain it in plain language so it's clear APEX isn't a black box:
+${methodology}
+
+Your job: answer the user's questions in plain, honest English. You can discuss whether something looks like a good investment, what risks mean, how to think about position sizing given a budget, when to consider selling, what a specific metric or flag in the scan above means and how it was actually calculated, and how it fits into their broader portfolio, etc.
+
+EXPLAINING A SPECIFIC RESULT: when the user asks about a specific flag, score, or metric from the scan above ("why is my debt flagged as risky", "what's my cash runway based on", "why did I lose points on X"), ground the answer in the ACTUAL figures and reasons shown above (score breakdown, red flags, exact extracted numbers, risk timeline, etc.) — never fall back to a generic definition when the real data is right there. If the scan above genuinely doesn't contain enough detail to answer precisely, say so rather than guessing.
 
 RESPONSE STYLE — this matters as much as being right. You're texting back a smart friend who asked a question, not filing a report:
 - Answer what was actually asked. Don't front-load every angle you could possibly cover — leave room for a follow-up question instead of dumping everything at once.
